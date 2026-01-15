@@ -34,7 +34,7 @@ Or manually:
 [matrixos]
 location = /var/db/repos/matrixos
 sync-type = git
-sync-uri = [https://github.com/lxnay/matrixos-overlay.git](https://github.com/lxnay/matrixos-overlay.git)
+sync-uri = https://github.com/lxnay/matrixos-overlay.git
 auto-sync = yes
 ```
 
