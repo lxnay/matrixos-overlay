@@ -25,7 +25,7 @@ You can add this overlay using `eselect-repository` or manually via `repos.conf`
 If you haven't already, install `eselect-repository`:
 ```bash
 emerge --ask app-eselect/eselect-repository
-eselect repository add matrixos-overlay git [https://github.com/lxnay/matrixos-overlay.git](https://github.com/lxnay/matrixos-overlay.git)
+eselect repository add matrixos-overlay git https://github.com/lxnay/matrixos-overlay.git
 emaint sync -r matrixos
 ```
 
