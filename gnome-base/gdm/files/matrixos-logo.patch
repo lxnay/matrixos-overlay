@@ -1,0 +1,14 @@
+--- a/data/org.gnome.login-screen.gschema.xml
++++ b/data/org.gnome.login-screen.gschema.xml
+@@ -31,7 +31,7 @@
+       </description>
+     </key>
+     <key name="logo" type="s">
+-      <default>''</default>
++      <default>'/usr/share/pixmaps/matrixos-logo-login.svg'</default>
+       <summary>
+         Path to small image at top of user list
+       </summary>
+-- 
+1.8.5.1
+

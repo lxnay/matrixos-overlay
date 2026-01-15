@@ -1,0 +1,35 @@
+From 8d80646ca301cf38045a4b3e64f5cd2e9f81ba85 Mon Sep 17 00:00:00 2001
+From: Namjae Jeon <linkinjeon@kernel.org>
+Date: Mon, 29 Dec 2025 10:49:32 +0900
+Subject: [PATCH 14/14] MAINTAINERS: add ntfs filesystem
+
+Add myself and Hyunchul Lee as ntfs maintainer.
+
+Signed-off-by: Namjae Jeon <linkinjeon@kernel.org>
+---
+ MAINTAINERS | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 12f49de7fe03..adf80c8207f1 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -18646,6 +18646,15 @@ W:	https://github.com/davejiang/linux/wiki
+ T:	git https://github.com/davejiang/linux.git
+ F:	drivers/ntb/hw/intel/
+ 
++NTFS FILESYSTEM
++M:	Namjae Jeon <linkinjeon@kernel.org>
++M:	Hyunchul Lee <hyc.lee@gmail.com>
++L:	linux-fsdevel@vger.kernel.org
++S:	Maintained
++T:	git git://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git
++F:	Documentation/filesystems/ntfs.rst
++F:	fs/ntfs/
++
+ NTFS3 FILESYSTEM
+ M:	Konstantin Komarov <almaz.alexandrovich@paragon-software.com>
+ L:	ntfs3@lists.linux.dev
+-- 
+2.47.3
+

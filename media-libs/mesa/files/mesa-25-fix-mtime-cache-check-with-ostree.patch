@@ -1,0 +1,14 @@
+--- mesa-25.2.7.orig/src/util/disk_cache.h
++++ mesa-25.2.7/src/util/disk_cache.h
+@@ -94,8 +94,9 @@ disk_cache_get_function_timestamp(void *
+ 
+    if (!st.st_mtime) {
+       fprintf(stderr, "Mesa: The provided filesystem timestamp for the cache "
+-              "is bogus! Disabling On-disk cache.\n");
+-      return false;
++              "is = 0. (ostree?). Assuming 1.\n");
++      *timestamp = 1;
++      return true;
+    }
+ 
+    *timestamp = st.st_mtime;

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="project">
+		<email>dist-kernel@gentoo.org</email>
+		<name>Distribution Kernel Project</name>
+	</maintainer>
+	<use>
+		<flag name="experimental">
+			Apply experimental patches; for more information, see "https://wiki.gentoo.org/wiki/Project:Kernel/Experimental".
+		</flag>
+		<flag name="hardened">
+			Use selection of hardening options recommended by Kernel Self
+			Protection Project
+		</flag>
+		<flag name="initramfs">
+			Build initramfs along with the kernel.
+		</flag>
+		<flag name="ostree">
+			Along with USE=initramfs, build an ostree compatible kernel and initramfs.
+		</flag>
+		<flag name="dracut-userconf">
+			Use /etc/dracut.conf and /etc/dracut.conf.d config files for building the initramfs enabled by USE=ostree.
+		</flag>
+	</use>
+</pkgmetadata>
