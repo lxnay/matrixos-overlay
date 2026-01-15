@@ -29,7 +29,7 @@ eselect repository add matrixos git https://github.com/lxnay/matrixos-overlay.gi
 emaint sync -r matrixos
 ```
 
-### Option 2: manually:
+### Option 2: Manually
 ```bash
 [matrixos]
 location = /var/db/repos/matrixos
