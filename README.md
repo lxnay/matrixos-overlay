@@ -38,12 +38,12 @@ sync-uri = https://github.com/lxnay/matrixos-overlay.git
 auto-sync = yes
 ```
 
-To install the matrixOS artwork (still WIP):
+### To install the matrixOS artwork (still WIP):
 ```bash
 emerge --ask x11-themes/matrixos-artwork-gnome
 ```
 
-To install the coolest kernel, with ostree support and ntfsplus built in:
+### To install the coolest kernel, with ostree support and ntfsplus built in:
 ```bash
 emerge --ask sys-kernel/matrixos-kernel
 ```
