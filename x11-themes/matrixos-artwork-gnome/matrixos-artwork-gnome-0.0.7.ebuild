@@ -3,7 +3,7 @@
 
 EAPI=8
 
-EGIT_REPO_URI="https://git.matrixos.org/matrixos.git"
+EGIT_REPO_URI="https://github.com/lxnay/matrixos-artwork.git"
 EGIT_COMMIT="${P}"
 inherit git-r3
 
@@ -23,12 +23,12 @@ src_unpack() {
 src_install() {
 	dodir /usr/share/pixmaps
 	insinto /usr/share/pixmaps
-	cd "${S}"/artwork/matrixos-artwork-gnome/pixmaps || die
+	cd "${S}"/${PN}/pixmaps || die
 	doins *.svg
 
 	dodir /usr/share/pixmaps/faces
 	insinto /usr/share/pixmaps/faces
-	cd "${S}"/artwork/matrixos-artwork-gnome/pixmaps/faces || die
+	cd "${S}"/${PN}/pixmaps/faces || die
 	doins *.jpg
 
 }
