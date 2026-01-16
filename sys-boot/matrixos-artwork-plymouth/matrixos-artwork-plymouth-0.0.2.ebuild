@@ -3,7 +3,7 @@
 
 EAPI=8
 
-EGIT_REPO_URI="https://git.matrixos.org/matrixos.git"
+EGIT_REPO_URI="https://github.com/lxnay/matrixos-artwork.git"
 EGIT_COMMIT="${P}"
 inherit git-r3
 
@@ -23,6 +23,6 @@ src_unpack() {
 src_install() {
 	dodir /usr/share/plymouth
 	insinto /usr/share/plymouth
-	cd "${S}"/artwork/matrixos-artwork-plymouth/ || die
+	cd "${S}"/${PN}/ || die
 	newins matrixos-logo-150x150.png bizcom.png
 }
