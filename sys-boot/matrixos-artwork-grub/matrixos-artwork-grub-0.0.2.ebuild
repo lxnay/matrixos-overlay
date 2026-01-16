@@ -3,7 +3,7 @@
 
 EAPI=8
 
-EGIT_REPO_URI="https://git.matrixos.org/matrixos.git"
+EGIT_REPO_URI="https://github.com/lxnay/matrixos-artwork.git"
 EGIT_COMMIT="${P}"
 inherit git-r3
 
@@ -23,6 +23,6 @@ src_unpack() {
 src_install() {
 	dodir /usr/share/grub/themes
 	insinto /usr/share/grub/themes
-	cd "${S}"/artwork/matrixos-artwork-grub/themes || die
+	cd "${S}"/${PN}/themes || die
 	doins -r matrixos-theme
 }
