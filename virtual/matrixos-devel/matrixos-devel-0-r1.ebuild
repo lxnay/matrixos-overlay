@@ -14,6 +14,7 @@ KEYWORDS="amd64"
 # >=sys-boot/shim-16.1
 
 RDEPEND="
+	app-arch/zstd
 	>=app-crypt/sbctl-0.18
 	app-eselect/eselect-repository
 	app-portage/gentoolkit
