@@ -34,6 +34,10 @@ src_install() {
 			newins "${FILESDIR}/motd-profile.d.sh" "matrixos-motd.sh"
 		)
 	fi
+
+	dodir /etc/sudoers.d
+	insinto /etc/sudoers.d
+	doins "${FILESDIR}/sudoers.d/50_matrixos"
 }
 
 pkg_postinst() {
