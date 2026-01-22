@@ -4,7 +4,7 @@ set -e
 to_ver="${1}"
 
 if [ -z "${to_ver}" ]; then
-	echo "${0} <from_ver> <to_ver>"
+	echo "${0} <to_ver>"
 	exit 1
 fi
 
