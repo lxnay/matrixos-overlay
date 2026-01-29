@@ -20,6 +20,7 @@ src_install() {
 	# 1. Create the destination directory
 	insinto /etc/kernel/config.d
 	doins "${FILESDIR}/00-matrixos.config"
+	doins "${FILESDIR}/90-virt.config"
 
 	use ntfsplus && doins "${FILESDIR}/00-matrixos-ntfsplus.config"
 	use ntfsplus && udev_dorules "${FILESDIR}"/*.rules
