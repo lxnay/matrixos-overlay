@@ -165,6 +165,11 @@ src_install() {
 	domo "${S}/po/"*.mo
 
 	readme.gentoo_create_doc
+
+	# Install snap.mount to support ostree based systemd
+	dodir /etc/systemd/system
+	insinto /etc/systemd/system
+	doins "${FILESDIR}/snap.mount"
 }
 
 pkg_postinst() {
