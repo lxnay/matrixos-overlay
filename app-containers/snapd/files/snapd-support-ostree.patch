@@ -1,0 +1,331 @@
+--- a/cmd/snap-confine/snap-confine.apparmor.in
++++ b/cmd/snap-confine/snap-confine.apparmor.in
+@@ -156,6 +156,7 @@
+     # Note 2: This rule is not needed because of rule '/var/lib/** rw', however we keep it because at
+     # some point we want to investigate if we can narrow the scope of the aforementioned rule.
+     /{tmp/snap.rootfs_*/,}var/lib/snapd/seccomp/bpf/*.bin{,2} r,
++    /sysroot/{tmp/snap.rootfs_*/,}var/lib/snapd/seccomp/bpf/*.bin{,2} r,
+ 
+     # adding a missing bpf mount
+     mount fstype=bpf options=(rw) bpf -> /sys/fs/bpf/,
+@@ -164,11 +165,21 @@
+     /tmp/snap.rootfs_** rw,
+     mount options=(remount ro) -> /tmp/snap.rootfs_*/,
+     mount options=(rw rbind) @SNAP_MOUNT_DIR@/*/*/**/ -> /tmp/snap.rootfs_**/,
++
++    /sysroot/tmp/snap.rootfs_** rw,
++    mount options=(remount ro) -> /sysroot/tmp/snap.rootfs_*/,
++    mount options=(rw rbind) @SNAP_MOUNT_DIR@/*/*/**/ -> /sysroot/tmp/snap.rootfs_**/,
++
+     # For mounting individual files
+     mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/** -> /tmp/snap.rootfs_*/**,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_**/,
++
++    mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/** -> /sysroot/tmp/snap.rootfs_*/**,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_**/,
++
+     # Allow mounting dirs from /
+     mount options=(rw rbind) /*/ -> /tmp/snap.rootfs_**/,
++    mount options=(rw rbind) /*/ -> /sysroot/tmp/snap.rootfs_**/,
+ 
+     # LP: #1668659 and parallel instaces of classic snaps
+     mount options=(rw rbind) /snap/ -> /snap/,
+@@ -182,12 +193,21 @@
+     mount options=(rw rshared) -> /,
+     mount options=(rw bind) /tmp/snap.rootfs_*/ -> /tmp/snap.rootfs_*/,
+     mount options=(rw unbindable) -> /tmp/snap.rootfs_*/,
++    /sysroot/tmp/snap.rootfs_*/ rw,
++    mount fstype=tmpfs none -> /sysroot/tmp/snap.rootfs_*/,
++    mount options=(rw rshared) -> /,
++    mount options=(rw bind) /sysroot/tmp/snap.rootfs_*/ -> /sysroot/tmp/snap.rootfs_*/,
++    mount options=(rw unbindable) -> /sysroot/tmp/snap.rootfs_*/,
+     # the next line is for classic system
+     mount options=(rw rbind) @SNAP_MOUNT_DIR@/*/*/ -> /tmp/snap.rootfs_*/,
++    mount options=(rw rbind) @SNAP_MOUNT_DIR@/*/*/ -> /sysroot/tmp/snap.rootfs_*/,
+     # the next line is for core system
+     mount options=(rw rbind) / -> /tmp/snap.rootfs_*/,
++    mount options=(rw rbind) / -> /sysroot/tmp/snap.rootfs_*/,
+     # all of the constructed rootfs is a rslave
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/,
++
+     # bidirectional mounts (for both classic and core)
+     # NOTE: this doesn't capture the MERGED_USR configuration option so that
+     # when a distro with merged /usr and / that uses apparmor shows up it
+@@ -196,76 +216,127 @@
+     mount options=(rw rbind) /{,run/}media/ -> /tmp/snap.rootfs_*/{,run/}media/,
+     /run/netns/ w,
+     mount options=(rw rbind) /run/netns/ -> /tmp/snap.rootfs_*/run/netns/,
++    mount options=(rw rbind) /{,run/}media/ -> /sysroot/tmp/snap.rootfs_*/{,run/}media/,
++    mount options=(rw rbind) /run/netns/ -> /sysroot/tmp/snap.rootfs_*/run/netns/,
+     # unidirectional mounts (only for classic system)
+     mount options=(rw rbind) /dev/ -> /tmp/snap.rootfs_*/dev/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/dev/,
++    mount options=(rw rbind) /dev/ -> /sysroot/tmp/snap.rootfs_*/dev/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/dev/,
+ 
+     mount options=(rw rbind) /etc/ -> /tmp/snap.rootfs_*/etc/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/etc/,
++    mount options=(rw rbind) /etc/ -> /sysroot/tmp/snap.rootfs_*/etc/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/etc/,
+ 
+     mount options=(rw rbind) /home/ -> /tmp/snap.rootfs_*/home/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/home/,
++    mount options=(rw rbind) /home/ -> /sysroot/tmp/snap.rootfs_*/home/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/home/,
++
++    mount options=(rw rbind) /var/home/ -> /sysroot/tmp/snap.rootfs_*/home/,
++    mount options=(rw rbind) /var/home/ -> /sysroot/tmp/snap.rootfs_*/var/home/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/var/home/,
+ 
+     mount options=(rw rbind) /root/ -> /tmp/snap.rootfs_*/root/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/root/,
++    mount options=(rw rbind) /root/ -> /sysroot/tmp/snap.rootfs_*/root/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/root/,
+ 
+     mount options=(rw rbind) /proc/ -> /tmp/snap.rootfs_*/proc/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/proc/,
++    mount options=(rw rbind) /proc/ -> /sysroot/tmp/snap.rootfs_*/proc/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/proc/,
+ 
+     mount options=(rw rbind) /sys/ -> /tmp/snap.rootfs_*/sys/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/sys/,
++    mount options=(rw rbind) /sys/ -> /sysroot/tmp/snap.rootfs_*/sys/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/sys/,
+ 
+     mount options=(rw rbind) /tmp/ -> /tmp/snap.rootfs_*/tmp/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/tmp/,
++    mount options=(rw rbind) /tmp/ -> /sysroot/tmp/snap.rootfs_*/tmp/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/tmp/,
++    mount options=(rw rbind) /sysroot/tmp/ -> /sysroot/tmp/snap.rootfs_*/tmp/,
+ 
+     mount options=(rw rbind) /var/lib/dhcp/ -> /tmp/snap.rootfs_*/var/lib/dhcp/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/var/lib/dhcp/,
++    mount options=(rw rbind) /var/lib/dhcp/ -> /sysroot/tmp/snap.rootfs_*/var/lib/dhcp/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/var/lib/dhcp/,
+ 
+     mount options=(rw rbind) /var/lib/snapd/ -> /tmp/snap.rootfs_*/var/lib/snapd/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/var/lib/snapd/,
++    mount options=(rw rbind) /var/lib/snapd/ -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/,
+ 
+     mount options=(rw rbind) /var/snap/ -> /tmp/snap.rootfs_*/var/snap/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/var/snap/,
++    mount options=(rw rbind) /var/snap/ -> /sysroot/tmp/snap.rootfs_*/var/snap/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/var/snap/,
+ 
+     mount options=(rw rbind) /var/tmp/ -> /tmp/snap.rootfs_*/var/tmp/,
++    mount options=(rw rbind) /var/tmp/ -> /sysroot/tmp/snap.rootfs_*/var/tmp/,
+     # /var/volatile is the default volatile location on Yocto/Poky, typically used with read-only rootfs setups
+     mount options=(rw rbind) /var/volatile/tmp/ -> /tmp/snap.rootfs_*/var/tmp/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/var/tmp/,
++    mount options=(rw rbind) /var/volatile/tmp/ -> /sysroot/tmp/snap.rootfs_*/var/tmp/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/var/tmp/,
+ 
+     mount options=(rw rbind) /run/ -> /tmp/snap.rootfs_*/run/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/run/,
++    mount options=(rw rbind) /run/ -> /sysroot/tmp/snap.rootfs_*/run/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/run/,
+ 
+     mount options=(rw rbind) /var/lib/extrausers/ -> /tmp/snap.rootfs_*/var/lib/extrausers/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/var/lib/extrausers/,
++    mount options=(rw rbind) /var/lib/extrausers/ -> /sysroot/tmp/snap.rootfs_*/var/lib/extrausers/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/var/lib/extrausers/,
+ 
+     mount options=(rw rbind) {,/usr}/lib{,32,64,x32}/modules/ -> /tmp/snap.rootfs_*{,/usr}/lib/modules/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*{,/usr}/lib/modules/,
++    mount options=(rw rbind) {,/usr}/lib{,32,64,x32}/modules/ -> /sysroot/tmp/snap.rootfs_*{,/usr}/lib/modules/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*{,/usr}/lib/modules/,
+ 
+     mount options=(rw rbind) {,/usr}/lib{,32,64,x32}/firmware/ -> /tmp/snap.rootfs_*{,/usr}/lib/firmware/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*{,/usr}/lib/firmware/,
++    mount options=(rw rbind) {,/usr}/lib{,32,64,x32}/firmware/ -> /sysroot/tmp/snap.rootfs_*{,/usr}/lib/firmware/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*{,/usr}/lib/firmware/,
+ 
+     mount options=(rw rbind) /var/log/ -> /tmp/snap.rootfs_*/var/log/,
++    mount options=(rw rbind) /var/log/ -> /sysroot/tmp/snap.rootfs_*/var/log/,
+     # /var/volatile is the default volatile location on Yocto/Poky, typically used with read-only rootfs setups
+     mount options=(rw rbind) /var/volatile/log/ -> /tmp/snap.rootfs_*/var/log/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/var/log/,
++    mount options=(rw rbind) /var/volatile/log/ -> /sysroot/tmp/snap.rootfs_*/var/log/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/var/log/,
+ 
+     mount options=(rw rbind) /usr/src/ -> /tmp/snap.rootfs_*/usr/src/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/usr/src/,
++    mount options=(rw rbind) /usr/src/ -> /sysroot/tmp/snap.rootfs_*/usr/src/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/usr/src/,
+ 
+     mount options=(rw rbind) /mnt/ -> /tmp/snap.rootfs_*/mnt/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/mnt/,
++    mount options=(rw rbind) /mnt/ -> /sysroot/tmp/snap.rootfs_*/mnt/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/mnt/,
+ 
+     # allow making host snap-exec available inside base snaps
+     mount options=(rw bind) @LIBEXECDIR@/ -> /tmp/snap.rootfs_*/usr/lib/snapd/,
+     mount options=(rw slave) -> /tmp/snap.rootfs_*/usr/lib/snapd/,
++    mount options=(rw bind) @LIBEXECDIR@/ -> /sysroot/tmp/snap.rootfs_*/usr/lib/snapd/,
++    mount options=(rw slave) -> /sysroot/tmp/snap.rootfs_*/usr/lib/snapd/,
+ 
+     # allow making re-execed host snap-exec available inside base snaps
+     mount options=(ro bind) @SNAP_MOUNT_DIR@/core/*/usr/lib/snapd/ -> /tmp/snap.rootfs_*/usr/lib/snapd/,
++    mount options=(ro bind) @SNAP_MOUNT_DIR@/core/*/usr/lib/snapd/ -> /sysroot/tmp/snap.rootfs_*/usr/lib/snapd/,
+     # allow making snapd snap tools available inside base snaps
+     mount options=(ro bind) @SNAP_MOUNT_DIR@/snapd/*/usr/lib/snapd/ -> /tmp/snap.rootfs_*/usr/lib/snapd/,
++    mount options=(ro bind) @SNAP_MOUNT_DIR@/snapd/*/usr/lib/snapd/ -> /sysroot/tmp/snap.rootfs_*/usr/lib/snapd/,
+ 
+     mount options=(rw bind) /usr/bin/snapctl -> /tmp/snap.rootfs_*/usr/bin/snapctl,
+     mount options=(rw slave) -> /tmp/snap.rootfs_*/usr/bin/snapctl,
++    mount options=(rw bind) /usr/bin/snapctl -> /sysroot/tmp/snap.rootfs_*/usr/bin/snapctl,
++    mount options=(rw slave) -> /sysroot/tmp/snap.rootfs_*/usr/bin/snapctl,
+ 
+     # /etc/alternatives (classic and normal mode)
+     mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/etc/alternatives/ -> /tmp/snap.rootfs_*/etc/alternatives/,
+@@ -274,8 +345,15 @@
+     mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/etc/apparmor/ -> /tmp/snap.rootfs_*/etc/apparmor/,
+     mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/etc/apparmor.d/ -> /tmp/snap.rootfs_*/etc/apparmor.d/,
+ 
++    mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/etc/alternatives/ -> /sysroot/tmp/snap.rootfs_*/etc/alternatives/,
++    mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/etc/ssl/ -> /sysroot/tmp/snap.rootfs_*/etc/ssl/,
++    mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/etc/nsswitch.conf -> /sysroot/tmp/snap.rootfs_*/etc/nsswitch.conf,
++    mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/etc/apparmor/ -> /sysroot/tmp/snap.rootfs_*/etc/apparmor/,
++    mount options=(rw bind) @SNAP_MOUNT_DIR@/*/*/etc/apparmor.d/ -> /sysroot/tmp/snap.rootfs_*/etc/apparmor.d/,
++
+     # /etc/alternatives (core/legacy mode)
+     mount options=(rw bind) /etc/alternatives/ -> /tmp/snap.rootfs_*/etc/alternatives/,
++    mount options=(rw bind) /etc/alternatives/ -> /sysroot/tmp/snap.rootfs_*/etc/alternatives/,
+ 
+     # making all those directories slave shared.
+     mount options=(rw slave) -> /tmp/snap.rootfs_*/etc/alternatives/,
+@@ -284,26 +362,46 @@
+     mount options=(rw slave) -> /tmp/snap.rootfs_*/etc/apparmor/,
+     mount options=(rw slave) -> /tmp/snap.rootfs_*/etc/apparmor.d/,
+ 
++    mount options=(rw slave) -> /sysroot/tmp/snap.rootfs_*/etc/alternatives/,
++    mount options=(rw slave) -> /sysroot/tmp/snap.rootfs_*/etc/ssl/,
++    mount options=(rw slave) -> /sysroot/tmp/snap.rootfs_*/etc/nsswitch.conf,
++    mount options=(rw slave) -> /sysroot/tmp/snap.rootfs_*/etc/apparmor/,
++    mount options=(rw slave) -> /sysroot/tmp/snap.rootfs_*/etc/apparmor.d/,
++
+     # the /snap directory
+     mount options=(rw rbind) @SNAP_MOUNT_DIR@/ -> /tmp/snap.rootfs_*/snap/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/snap/,
++
++    mount options=(rw rbind) /var/lib/snapd/snap/ -> /sysroot/tmp/snap.rootfs_*/snap/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/snap/,
++
+     # pivot_root preparation and execution
+     mount options=(rw bind) /tmp/snap.rootfs_*/var/lib/snapd/hostfs/ -> /tmp/snap.rootfs_*/var/lib/snapd/hostfs/,
++    mount options=(rw bind) /sysroot/tmp/snap.rootfs_*/var/lib/snapd/hostfs/ -> /tmp/snap.rootfs_*/var/lib/snapd/hostfs/,
+     mount options=(rw private) -> /tmp/snap.rootfs_*/var/lib/snapd/hostfs/,
++    mount options=(rw bind) /tmp/snap.rootfs_*/var/lib/snapd/hostfs/ -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/hostfs/,
++    mount options=(rw private) -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/hostfs/,
++    mount options=(rw bind) /sysroot/tmp/snap.rootfs_*/var/lib/snapd/hostfs/ -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/hostfs/,
+ 
+     # pivot_root mediation in AppArmor is not complete. See LP: #1791711.
+     # However, we can mediate the new_root and put_old to be what we expect,
+     # and then deny directory creation within old_root to prevent trivial
+     # pivoting into an allowlisted path.
+     pivot_root oldroot=/tmp/snap.rootfs_*/var/lib/snapd/hostfs/ /tmp/snap.rootfs_*/,
++    pivot_root oldroot=/tmp/snap.rootfs_*/var/lib/snapd/hostfs/ /sysroot/tmp/snap.rootfs_*/,
++    pivot_root oldroot=/sysroot/tmp/snap.rootfs_*/var/lib/snapd/hostfs/ /sysroot/tmp/snap.rootfs_*/,
++    pivot_root oldroot=/sysroot/tmp/snap.rootfs_*/var/lib/snapd/hostfs/ /tmp/snap.rootfs_*/,
++
+     # Explicitly deny creating the old_root directory in case it is
+     # inadvertently added somewhere else. While this doesn't resolve
+     # LP: #1791711, it provides some hardening.
+     # For dir on dir mounts, we do need write permissions in /var though
+     audit deny /tmp/snap.rootfs_*/{var/lib/,var/lib/snapd/,var/lib/snapd/hostfs/} w,
++    audit deny /sysroot/tmp/snap.rootfs_*/{var/lib/,var/lib/snapd/,var/lib/snapd/hostfs/} w,
+ 
+     # cleanup
+     umount /var/lib/snapd/hostfs/tmp/snap.rootfs_*/,
++    umount /var/lib/snapd/hostfs/sysroot/tmp/snap.rootfs_*/,
+     umount /var/lib/snapd/hostfs/sys/,
+     umount /var/lib/snapd/hostfs/dev/,
+     umount /var/lib/snapd/hostfs/proc/,
+@@ -332,14 +430,26 @@
+     # set up snap-specific private /tmp dir
+     capability chown,
+     /tmp/ rw,
++    /sysroot/tmp/ rw,
++
+     /tmp/snap-private-tmp/ rw,
+     /tmp/snap-private-tmp/snap.*/ rw,
+     /tmp/snap-private-tmp/snap.*/tmp/ rw,
++    /sysroot/tmp/snap-private-tmp/ rw,
++    /sysroot/tmp/snap-private-tmp/snap.*/ rw,
++    /sysroot/tmp/snap-private-tmp/snap.*/tmp/ rw,
++
+     mount options=(rw private) ->  /tmp/,
+     mount options=(rw bind) /tmp/snap-private-tmp/snap.*/tmp/ -> /tmp/,
++    mount options=(rw private) ->  /sysroot/tmp/,
++    mount options=(rw bind) /sysroot/tmp/snap-private-tmp/snap.*/tmp/ -> /sysroot/tmp/,
++    mount options=(rw bind) /tmp/snap-private-tmp/snap.*/tmp/ -> /sysroot/tmp/,
++    mount options=(rw bind) /sysroot/tmp/snap-private-tmp/snap.*/tmp/ -> /tmp/,
++
+     mount fstype=devpts options=(rw) devpts -> /dev/pts/,
+     mount options=(rw bind) /dev/pts/ptmx -> /dev/ptmx,     # for bind mounting
+     mount options=(rw bind) /dev/pts/ptmx -> /dev/pts/ptmx, # for bind mounting under LXD
++
+     # Workaround for LP: #1584456 on older kernels that mistakenly think
+     # /dev/pts/ptmx needs a trailing '/'
+     mount options=(rw bind) /dev/pts/ptmx/ -> /dev/ptmx/,
+@@ -370,16 +480,30 @@
+     mount fstype=tmpfs options=(rw nodev noexec) none -> /tmp/snap.rootfs_*/var/lib/snapd/lib/gl{,32}/,
+     mount options=(remount ro bind) -> /tmp/snap.rootfs_*/var/lib/snapd/lib/gl{,32}/,
+ 
++    mount options=(rw bind) /usr/lib{,32}/nvidia-*/ -> /sysroot/{tmp/snap.rootfs_*/,}var/lib/snapd/lib/gl{,32}/,
++    mount options=(rw bind) /usr/lib{,32}/nvidia-*/ -> /sysroot/{tmp/snap.rootfs_*/,}var/lib/snapd/lib/gl{,32}/,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/gl{,32}/{,*} w,
++    mount fstype=tmpfs options=(rw nodev noexec) none -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/gl{,32}/,
++    mount options=(remount ro bind) -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/gl{,32}/,
++
+     # Vulkan support
+     /tmp/snap.rootfs_*/var/lib/snapd/lib/vulkan/{,*} w,
+     mount fstype=tmpfs options=(rw nodev noexec) none -> /tmp/snap.rootfs_*/var/lib/snapd/lib/vulkan/,
+     mount options=(remount ro bind) -> /tmp/snap.rootfs_*/var/lib/snapd/lib/vulkan/,
+ 
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/vulkan/{,*} w,
++    mount fstype=tmpfs options=(rw nodev noexec) none -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/vulkan/,
++    mount options=(remount ro bind) -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/vulkan/,
++
+     # GLVND EGL vendor
+     /tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/{,*} w,
+     mount fstype=tmpfs options=(rw nodev noexec) none -> /tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/,
+     mount options=(remount ro bind) -> /tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/,
+ 
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/{,*} w,
++    mount fstype=tmpfs options=(rw nodev noexec) none -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/,
++    mount options=(remount ro bind) -> /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/,
++
+     # create gl dirs as needed
+     /tmp/snap.rootfs_*/ r,
+     /tmp/snap.rootfs_*/var/ r,
+@@ -393,6 +517,18 @@
+     /tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/ r,
+     /tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/** rw,
+ 
++    /sysroot/tmp/snap.rootfs_*/ r,
++    /sysroot/tmp/snap.rootfs_*/var/ r,
++    /sysroot/tmp/snap.rootfs_*/var/lib/ r,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/ r,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/ r,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/gl{,32}/ r,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/gl{,32}/** rw,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/vulkan/ r,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/vulkan/** rw,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/ r,
++    /sysroot/tmp/snap.rootfs_*/var/lib/snapd/lib/glvnd/** rw,
++
+     # for chroot on steroids, we use pivot_root as a better chroot that makes
+     # apparmor rules behave the same on classic and outside of classic.
+ 
+@@ -616,6 +752,8 @@
+     # Allow mounting /var/lib/jenkins from the host into the snap.
+     mount options=(rw rbind) /var/lib/jenkins/ -> /tmp/snap.rootfs_*/var/lib/jenkins/,
+     mount options=(rw rslave) -> /tmp/snap.rootfs_*/var/lib/jenkins/,
++    mount options=(rw rbind) /var/lib/jenkins/ -> /sysroot/tmp/snap.rootfs_*/var/lib/jenkins/,
++    mount options=(rw rslave) -> /sysroot/tmp/snap.rootfs_*/var/lib/jenkins/,
+ 
+     # Suppress noisy file_inherit denials (LP: #1850552) until LP: #1849753 is
+     # fixed.
