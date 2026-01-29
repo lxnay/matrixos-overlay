@@ -3,7 +3,6 @@ Description=Bind mount /snap for Snapd confinement
 Documentation=man:snapd(8)
 Before=snapd.service snapd.socket
 RequiresMountsFor=/var/lib/snapd/snap
-After=local-fs.target
 
 [Mount]
 What=/var/lib/snapd/snap
