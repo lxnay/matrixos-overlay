@@ -15,6 +15,9 @@ LICENSE="GPL-2"
 SLOT="0"
 KEYWORDS="amd64"
 IUSE="+ntfsplus"
+RDEPEND="
+	ntfsplus? ( sys-fs/ntfs3g[-mount-ntfs] )
+"
 
 src_install() {
 	# 1. Create the destination directory
@@ -22,8 +25,18 @@ src_install() {
 	doins "${FILESDIR}/00-matrixos.config"
 	doins "${FILESDIR}/90-virt.config"
 
-	use ntfsplus && doins "${FILESDIR}/00-matrixos-ntfsplus.config"
-	use ntfsplus && udev_dorules "${FILESDIR}"/*.rules
+	if use ntfsplus; then
+		doins "${FILESDIR}/00-matrixos-ntfsplus.config"
+		udev_dorules "${FILESDIR}"/*.rules
+
+		dodir /etc/modprobe.d
+		insinto /etc/modprobe.d
+		newins "${FILESDIR}/ntfsplus-modprobe.d.conf" "ntfsplus.conf"
+
+		dodir /etc/modules-load.d
+		insinto /etc/modules-load.d
+		newins "${FILESDIR}/ntfsplus-modules-load.d.conf" "ntfsplus.conf"
+	fi
 
 	dodir /etc/repart.d
 	insinto /etc/repart.d
