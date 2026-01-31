@@ -32,6 +32,9 @@ BDEPEND="
 distutils_enable_tests unittest
 
 python_install_all() {
+	dodir /etc/ostree
+	insinto /etc/ostree
+	newins "ostree-receive.conf" "ostree-receive.conf.example"
 	rm -rf "${ED}/usr/share/doc" || die
 	distutils-r1_python_install_all
 }
