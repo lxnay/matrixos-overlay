@@ -4,6 +4,7 @@
 EAPI=8
 
 DESCRIPTION="User for matrixOS"
+KEYWORDS="amd64"
 SLOT=0
 S="${WORKDIR}"
 
