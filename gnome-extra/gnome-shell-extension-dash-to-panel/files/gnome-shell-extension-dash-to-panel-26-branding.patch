@@ -5,7 +5,7 @@
      </key>
      <key type="s" name="show-apps-icon-file">
 -      <default>""</default>
-+      <default>"/usr/share/pixmaps/matrixos-logo-lightmode.svg"</default>
++      <default>"/usr/share/pixmaps/matrixos-logo-login.svg"</default>
        <summary>Custom Show Applications icon</summary>
        <description>Customize the Show Applications icon</description>
      </key>
