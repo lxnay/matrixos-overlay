@@ -10,7 +10,6 @@ DESCRIPTION="An icon taskbar for the Gnome Shell"
 HOMEPAGE="https://github.com/home-sweet-gnome/dash-to-panel"
 SRC_URI="
 	https://github.com/home-sweet-gnome/${MY_PN}/archive/v${PV}.tar.gz -> ${P}.tar.gz
-	branding? ( https://www.mail-archive.com/tango-artists@lists.freedesktop.org/msg00043/tango-gentoo-v1.1.tar.gz )
 "
 S="${WORKDIR}/${MY_P}"
 extension_uuid="dash-to-panel@jderose9.github.com"
@@ -22,6 +21,9 @@ IUSE="branding"
 
 COMMON_DEPEND="dev-libs/glib:2"
 RDEPEND="${COMMON_DEPEND}
+	x11-themes/matrixos-artwork-gnome
+	gnome-base/dconf
+
 	app-eselect/eselect-gnome-shell-extensions
 	>=gnome-base/gnome-shell-46
 "
@@ -46,10 +48,9 @@ src_prepare() {
 
 src_install() {
 	default
-	if use branding; then
-		insinto /usr/share/gnome-shell/extensions/dash-to-panel@jderose9.github.com/img
-		doins "${WORKDIR}/tango-gentoo-v1.1/scalable/gentoo.svg"
-	fi
+	dodir /etc/dconf/db/matrixos.d
+	insinto /etc/dconf/db/matrixos.d
+	doins "${FILESDIR}"/00-matrixos-dash-to-panel-settings
 }
 
 pkg_preinst() {
@@ -58,6 +59,8 @@ pkg_preinst() {
 
 pkg_postinst() {
 	gnome2_schemas_update
+	dconf update
+
 	ebegin "Updating list of installed extensions"
 	eselect gnome-shell-extensions update
 	eend $?
