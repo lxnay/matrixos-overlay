@@ -21,7 +21,7 @@ IUSE="branding"
 
 COMMON_DEPEND="dev-libs/glib:2"
 RDEPEND="${COMMON_DEPEND}
-	>=x11-themes/matrixos-artwork-gnome-0.0.8
+	x11-themes/matrixos-artwork-gnome
 	gnome-base/dconf
 
 	app-eselect/eselect-gnome-shell-extensions
