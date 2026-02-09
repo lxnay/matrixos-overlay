@@ -1,0 +1,34 @@
+From 67774c4f7327c95d81e1861a95507dcb8c86b327 Mon Sep 17 00:00:00 2001
+From: Fabio Erculiani <m@lxnay.me>
+Date: Mon, 9 Feb 2026 15:31:47 +0100
+Subject: [PATCH] status: Include deployment origin refspec as refspec in JSON
+ output
+
+---
+ src/ostree/ot-admin-builtin-status.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/ostree/ot-admin-builtin-status.c b/src/ostree/ot-admin-builtin-status.c
+index 459f28f0..8c5b7e2f 100644
+--- a/src/ostree/ot-admin-builtin-status.c
++++ b/src/ostree/ot-admin-builtin-status.c
+@@ -197,11 +197,16 @@ deployment_write_json (OstreeSysroot *sysroot, OstreeRepo *repo, OstreeDeploymen
+                        gboolean is_booted, gboolean is_pending, gboolean is_rollback,
+                        struct ul_jsonwrt *jo, GCancellable *cancellable, GError **error)
+ {
++  GKeyFile *origin = ostree_deployment_get_origin (deployment);
++  g_autofree char *origin_refspec
++      = origin ? g_key_file_get_string (origin, "origin", "refspec", NULL) : NULL;
++
+   ul_jsonwrt_object_open (jo, NULL);
+ 
+   const char *ref = ostree_deployment_get_csum (deployment);
+   ul_jsonwrt_value_s (jo, "checksum", ref);
+   ul_jsonwrt_value_s (jo, "stateroot", ostree_deployment_get_osname (deployment));
++  ul_jsonwrt_value_s (jo, "refspec", origin_refspec);
+   ul_jsonwrt_value_u64 (jo, "serial", ostree_deployment_get_deployserial (deployment));
+   ul_jsonwrt_value_u64 (jo, "index", ostree_deployment_get_index (deployment));
+   ul_jsonwrt_value_boolean (jo, "booted", is_booted);
+-- 
+2.52.0
+
