@@ -42,6 +42,10 @@ src_install() {
 	dodir /etc/flatpak/remotes.d
 	insinto /etc/flatpak/remotes.d
 	doins "${FILESDIR}/flathub.flatpakrepo"
+
+	dodir /etc/dconf/profile
+	insinto /etc/dconf/profile
+	newins "${FILESDIR}/dconf-profile-user" "user"
 }
 
 pkg_postinst() {
