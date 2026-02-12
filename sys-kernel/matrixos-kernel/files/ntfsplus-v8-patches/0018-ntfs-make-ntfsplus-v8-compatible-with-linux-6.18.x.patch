@@ -1,0 +1,127 @@
+From d2334036d97595ef77c1df49f07c1450d1109716 Mon Sep 17 00:00:00 2001
+From: Fabio Erculiani <m@lxnay.me>
+Date: Thu, 12 Feb 2026 17:30:25 +0100
+Subject: [PATCH 18/18] ntfs: make ntfsplus v8 compatible with linux-6.18.x
+
+---
+ fs/ntfs/aops.c  | 7 +++----
+ fs/ntfs/file.c  | 2 +-
+ fs/ntfs/inode.c | 8 ++++----
+ fs/ntfs/mft.c   | 2 +-
+ fs/ntfs/namei.c | 2 +-
+ 5 files changed, 10 insertions(+), 11 deletions(-)
+
+diff --git a/fs/ntfs/aops.c b/fs/ntfs/aops.c
+index 01ed11f56890..e0abfc94d771 100644
+--- a/fs/ntfs/aops.c
++++ b/fs/ntfs/aops.c
+@@ -28,7 +28,7 @@
+  * - If the attribute is non-resident and compressed, the read operation is
+  *   delegated to ntfs_read_compressed_block().
+  * - For normal resident or non-resident attribute, it utilizes the generic
+- *   iomap infrastructure via iomap_bio_read_folio() to perform the I/O.
++ *   iomap infrastructure via iomap_read_folio() to perform the I/O.
+  *
+  * Return: 0 on success, or -errno on error.
+  */
+@@ -58,8 +58,7 @@ static int ntfs_read_folio(struct file *file, struct folio *folio)
+ 			return ntfs_read_compressed_block(folio);
+ 	}
+ 
+-	iomap_bio_read_folio(folio, &ntfs_read_iomap_ops);
+-	return 0;
++	return iomap_read_folio(folio, &ntfs_read_iomap_ops);
+ }
+ 
+ /*
+@@ -195,7 +194,7 @@ static void ntfs_readahead(struct readahead_control *rac)
+ 	 */
+ 	if (!NInoNonResident(ni) || NInoCompressed(ni))
+ 		return;
+-	iomap_bio_readahead(rac, &ntfs_read_iomap_ops);
++	iomap_readahead(rac, &ntfs_read_iomap_ops);
+ }
+ 
+ static int ntfs_writepages(struct address_space *mapping,
+diff --git a/fs/ntfs/file.c b/fs/ntfs/file.c
+index f6a0a62981d3..b599d9687fde 100644
+--- a/fs/ntfs/file.c
++++ b/fs/ntfs/file.c
+@@ -211,7 +211,7 @@ static int ntfs_file_fsync(struct file *filp, loff_t start, loff_t end,
+ 			if (IS_ERR(attr_vi))
+ 				continue;
+ 			spin_lock(&attr_vi->i_lock);
+-			if (inode_state_read_once(attr_vi) & I_DIRTY_PAGES) {
++			if (attr_vi->i_state & I_DIRTY_PAGES) {
+ 				spin_unlock(&attr_vi->i_lock);
+ 				filemap_write_and_wait(attr_vi->i_mapping);
+ 			} else
+diff --git a/fs/ntfs/inode.c b/fs/ntfs/inode.c
+index e822c97f33e8..125315cf5c86 100644
+--- a/fs/ntfs/inode.c
++++ b/fs/ntfs/inode.c
+@@ -168,7 +168,7 @@ struct inode *ntfs_iget(struct super_block *sb, unsigned long mft_no)
+ 	err = 0;
+ 
+ 	/* If this is a freshly allocated inode, need to read it now. */
+-	if (inode_state_read_once(vi) & I_NEW) {
++	if (vi->i_state & I_NEW) {
+ 		err = ntfs_read_locked_inode(vi);
+ 		unlock_new_inode(vi);
+ 	}
+@@ -228,7 +228,7 @@ struct inode *ntfs_attr_iget(struct inode *base_vi, __le32 type,
+ 	err = 0;
+ 
+ 	/* If this is a freshly allocated inode, need to read it now. */
+-	if (inode_state_read_once(vi) & I_NEW) {
++	if (vi->i_state & I_NEW) {
+ 		err = ntfs_read_locked_attr_inode(base_vi, vi);
+ 		unlock_new_inode(vi);
+ 	}
+@@ -283,7 +283,7 @@ struct inode *ntfs_index_iget(struct inode *base_vi, __le16 *name,
+ 	err = 0;
+ 
+ 	/* If this is a freshly allocated inode, need to read it now. */
+-	if (inode_state_read_once(vi) & I_NEW) {
++	if (vi->i_state & I_NEW) {
+ 		err = ntfs_read_locked_index_inode(base_vi, vi);
+ 		unlock_new_inode(vi);
+ 	}
+@@ -375,7 +375,7 @@ int ntfs_drop_big_inode(struct inode *inode)
+ {
+ 	struct ntfs_inode *ni = NTFS_I(inode);
+ 
+-	if (!inode_unhashed(inode) && inode_state_read_once(inode) & I_SYNC) {
++	if (!inode_unhashed(inode) && inode->i_state & I_SYNC) {
+ 		if (ni->type == AT_DATA || ni->type == AT_INDEX_ALLOCATION) {
+ 			if (!inode->i_nlink) {
+ 				struct ntfs_inode *ni = NTFS_I(inode);
+diff --git a/fs/ntfs/mft.c b/fs/ntfs/mft.c
+index 79fbe90e2bb4..9027c2f07dc8 100644
+--- a/fs/ntfs/mft.c
++++ b/fs/ntfs/mft.c
+@@ -658,7 +658,7 @@ static int ntfs_test_inode_wb(struct inode *vi, unsigned long ino, void *data)
+ 	 * called
+ 	 */
+ 	spin_lock(&vi->i_lock);
+-	if (inode_state_read_once(vi) & I_CREATING) {
++	if (vi->i_state & I_CREATING) {
+ 		spin_unlock(&vi->i_lock);
+ 		na->state = NI_BeingCreated;
+ 		return -1;
+diff --git a/fs/ntfs/namei.c b/fs/ntfs/namei.c
+index a21eeaec57b4..7ae2fa434b14 100644
+--- a/fs/ntfs/namei.c
++++ b/fs/ntfs/namei.c
+@@ -504,7 +504,7 @@ static struct ntfs_inode *__ntfs_create(struct mnt_idmap *idmap, struct inode *d
+ 	 * Caller must call d_instantiate_new instead of d_instantiate.
+ 	 */
+ 	spin_lock(&vi->i_lock);
+-	inode_state_set(vi, I_NEW | I_CREATING);
++	vi->i_state = I_NEW | I_CREATING;
+ 	spin_unlock(&vi->i_lock);
+ 
+ 	/* Add the inode to the inode hash for the superblock. */
+-- 
+2.52.0
+

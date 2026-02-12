@@ -225,7 +225,7 @@ RDEPEND="${RDEPEND}
 MATRIXOS_MYVERSION="-${PN%%-*}"
 
 _matrixos_src_prepare() {
-	eapply "${FILESDIR}"/ntfsplus-v3-patches/*.patch
+	eapply "${FILESDIR}"/ntfsplus-v8-patches/*.patch
 }
 
 src_install() {
