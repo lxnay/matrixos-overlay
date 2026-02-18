@@ -15,6 +15,7 @@ SRC_URI="amd64? ( https://kojipkgs.fedoraproject.org/packages/shim/${PV}/${FEDOR
 		arm64? ( https://kojipkgs.fedoraproject.org/packages/shim/${PV}/${FEDORA_PR}/aarch64/shim-aa64-${PV}-${FEDORA_PR}.aarch64.rpm )"
 S="${WORKDIR}/usr/lib/efi/shim/${PV}-${FEDORA_PR}/EFI"
 
+DEPEND=">=sys-boot/grub-2.14[sbat4]"
 LICENSE="BSD"
 SLOT="0"
 KEYWORDS="amd64 arm64 x86"
