@@ -3,7 +3,7 @@
 
 EAPI=8
 
-inherit go-module optfeature verify-sig
+inherit go-module
 
 DESCRIPTION="matrixOS management toolking"
 HOMEPAGE="https://github.com/lxnay/matrixos.git"
