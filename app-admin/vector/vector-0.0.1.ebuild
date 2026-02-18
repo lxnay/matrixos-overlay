@@ -29,11 +29,28 @@ src_unpack() {
 }
 
 src_compile() {
-	mkdir "${S}/bin" || die
-	ego build -ldflags "-X main.Version=${PV}" -o bin/ ./...
+	mkdir "${T}/bin" || die
+	ego build -ldflags "-X main.Version=${PV}" -o "${T}"/bin/ ./...
 }
 
 src_install() {
 	exeinto /usr/bin
-	doexe "${S}/bin/vector"
+	doexe "${T}/bin/vector"
+
+	dodir /etc/matrixos/conf
+	insinto /etc/matrixos/conf
+	doins "${S}/conf/matrixos.conf"
+
+	dodir /etc/matrixos/conf/matrixos.conf.d
+	insinto /etc/matrixos/conf/matrixos.conf.d
+	echo "# Use this directory for adding overrides on top of matrixos.conf" > "${T}"/README
+	doins "${T}/README"
+
+	mv "${S}/conf/matrixos.conf" "${S}/conf/matrixos.conf.example" || die
+	rm -rf "${S}/vendor"
+
+	dodir /usr/lib/matrixos
+	insinto /usr/lib/matrixos
+	cd "${S}"
+	doins -r .
 }
