@@ -1,0 +1,3 @@
+# Type  Path                        Mode    User    Group   Age    Argument
+d       /var/spool/cron             0755    root    root    -      -
+d       /var/spool/cron/crontabs    1730    root    crontab -      -
