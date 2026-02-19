@@ -8,8 +8,8 @@ inherit go-module
 DESCRIPTION="matrixOS management toolking"
 HOMEPAGE="https://github.com/lxnay/matrixos.git"
 SRC_URI="https://github.com/lxnay/matrixos/archive/refs/tags/${P}.tar.gz
-	http://data.matrixos.org/vector/${P}-vendor.tar.xz"
-S="${WORKDIR}/matrixos-${P}"
+	https://github.com/lxnay/matrixos/releases/download/${P}/matrixos-${P}-vendor.tar.gz"
+S="${WORKDIR}"
 
 LICENSE="BSD-2"
 SLOT="0"
@@ -21,11 +21,6 @@ BDEPEND=""
 
 src_unpack() {
 	default
-	# TODO:
-	# - add CI pipeline runner that creates the vendor pkg.
-	# - automate the process of creating new releases
-	# - do not hardcode matrixos.clean
-	mv "${WORKDIR}/matrixos.clean/vendor" "${S}" || die
 }
 
 src_compile() {
