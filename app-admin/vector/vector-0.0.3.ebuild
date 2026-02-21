@@ -34,7 +34,7 @@ src_install() {
 
 	dodir /etc/matrixos/conf
 	insinto /etc/matrixos/conf
-	doins "${S}/conf/matrixos.conf"
+	doins "${S}"/conf/*.conf
 
 	dodir /etc/matrixos/conf/matrixos.conf.d
 	insinto /etc/matrixos/conf/matrixos.conf.d
