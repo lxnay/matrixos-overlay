@@ -10,12 +10,12 @@ inherit kernel-build toolchain-funcs verify-sig
 
 BASE_P=linux-${PV%.*}
 PATCH_PV=${PV%_p*}
-PATCHSET=linux-gentoo-patches-6.18.2
+PATCHSET=linux-gentoo-patches-6.18.4
 # https://koji.fedoraproject.org/koji/packageinfo?packageID=8
 # forked to https://github.com/projg2/fedora-kernel-config-for-gentoo
-CONFIG_VER=6.18.1-gentoo
+CONFIG_VER=6.18.12-gentoo
 GENTOO_CONFIG_VER=g18
-SHA256SUM_DATE=20251218
+SHA256SUM_DATE=20260219
 
 DESCRIPTION="Linux kernel built for matrixOS with Gentoo patches"
 HOMEPAGE="
@@ -225,7 +225,7 @@ RDEPEND="${RDEPEND}
 MATRIXOS_MYVERSION="-${PN%%-*}"
 
 _matrixos_src_prepare() {
-	eapply "${FILESDIR}"/ntfsplus-v3-patches/*.patch
+	eapply "${FILESDIR}"/ntfsplus-v8-patches/*.patch
 }
 
 src_install() {
