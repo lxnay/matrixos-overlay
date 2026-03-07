@@ -14,7 +14,7 @@ S="${WORKDIR}"
 LICENSE="GPL-2"
 SLOT="0"
 KEYWORDS="amd64"
-IUSE="motd"
+IUSE=""
 
 RDEPEND="app-admin/flatpak-remotes"
 
@@ -28,14 +28,6 @@ src_install() {
 		insinto /etc/tmpfiles.d
 		newins "${FILESDIR}/tmpfiles.d-0.conf" "${LIVE_HOME_CONF}"
 	)
-
-	if use motd; then
-		(
-			insopts -m 0755
-			insinto /etc/profile.d
-			newins "${FILESDIR}/motd-profile.d.sh" "matrixos-motd.sh"
-		)
-	fi
 
 	dodir /etc/sudoers.d
 	insinto /etc/sudoers.d
