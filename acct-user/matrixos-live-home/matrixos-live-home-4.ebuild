@@ -16,6 +16,8 @@ SLOT="0"
 KEYWORDS="amd64"
 IUSE="motd"
 
+RDEPEND="app-admin/flatpak-remotes"
+
 LIVE_HOME_CONF=matrixos-live-home.conf
 
 src_install() {
@@ -38,10 +40,6 @@ src_install() {
 	dodir /etc/sudoers.d
 	insinto /etc/sudoers.d
 	doins "${FILESDIR}/sudoers.d/50_matrixos"
-
-	dodir /etc/flatpak/remotes.d
-	insinto /etc/flatpak/remotes.d
-	doins "${FILESDIR}/flathub.flatpakrepo"
 
 	dodir /etc/dconf/profile
 	insinto /etc/dconf/profile
