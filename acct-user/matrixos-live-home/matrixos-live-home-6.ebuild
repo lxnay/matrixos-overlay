@@ -16,7 +16,10 @@ SLOT="0"
 KEYWORDS="amd64"
 IUSE=""
 
-RDEPEND="app-admin/flatpak-remotes"
+RDEPEND="
+	app-admin/flatpak-remotes
+	gnome-base/dconf-setup
+"
 
 LIVE_HOME_CONF=matrixos-live-home.conf
 
@@ -32,10 +35,6 @@ src_install() {
 	dodir /etc/sudoers.d
 	insinto /etc/sudoers.d
 	doins "${FILESDIR}/sudoers.d/50_matrixos"
-
-	dodir /etc/dconf/profile
-	insinto /etc/dconf/profile
-	newins "${FILESDIR}/dconf-profile-user" "user"
 }
 
 pkg_postinst() {
