@@ -17,6 +17,7 @@ KEYWORDS="amd64"
 IUSE=""
 
 RDEPEND="
+	acct-group/sudoers-config
 	app-admin/flatpak-remotes
 	gnome-base/dconf-setup
 "
@@ -31,10 +32,6 @@ src_install() {
 		insinto /etc/tmpfiles.d
 		newins "${FILESDIR}/tmpfiles.d-0.conf" "${LIVE_HOME_CONF}"
 	)
-
-	dodir /etc/sudoers.d
-	insinto /etc/sudoers.d
-	doins "${FILESDIR}/sudoers.d/50_matrixos"
 }
 
 pkg_postinst() {
