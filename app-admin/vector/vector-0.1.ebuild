@@ -54,6 +54,7 @@ src_install() {
 
 	mv "${S}/conf/matrixos.conf" "${S}/conf/matrixos.conf.example" || die
 	rm -rf "${S}/vendor"
+	rm -rf "${S}/matrixos-${P}"
 
 	dodir /usr/lib/matrixos
 	insinto /usr/lib/matrixos
