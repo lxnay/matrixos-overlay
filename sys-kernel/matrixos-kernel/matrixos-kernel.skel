@@ -10,12 +10,12 @@ inherit kernel-build toolchain-funcs verify-sig
 
 BASE_P=linux-${PV%.*}
 PATCH_PV=${PV%_p*}
-PATCHSET=linux-gentoo-patches-6.18.4
+PATCHSET=linux-gentoo-patches-6.19.6
 # https://koji.fedoraproject.org/koji/packageinfo?packageID=8
 # forked to https://github.com/projg2/fedora-kernel-config-for-gentoo
 CONFIG_VER=6.19.2-gentoo
 GENTOO_CONFIG_VER=g18
-SHA256SUM_DATE=20260219
+SHA256SUM_DATE=20260304
 
 DESCRIPTION="Linux kernel built for matrixOS with Gentoo patches"
 HOMEPAGE="
@@ -56,7 +56,7 @@ SRC_URI+="
 S=${WORKDIR}/${BASE_P}
 
 KEYWORDS="~amd64 ~arm ~arm64 ~hppa ~loong ~ppc ~ppc64 ~riscv ~sparc ~x86"
-IUSE="debug experimental hardened"
+IUSE="debug hardened"
 REQUIRED_USE="
 	arm? ( savedconfig )
 	hppa? ( savedconfig )
@@ -99,16 +99,7 @@ src_prepare() {
 
 	local patch
 	eapply "${WORKDIR}/patch-${PATCH_PV}"
-	for patch in "${WORKDIR}/${PATCHSET}"/*.patch; do
-		eapply "${patch}"
-		# non-experimental patches always finish with Gentoo Kconfig
-		# when ! use experimental, stop applying after it
-		if [[ ${patch} == *Add-Gentoo-Linux-support-config-settings* ]] &&
-			! use experimental
-		then
-			break
-		fi
-	done
+	eapply "${WORKDIR}/${PATCHSET}"
 
 	default
 
