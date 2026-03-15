@@ -41,11 +41,23 @@ src_install() {
 	echo "# Use this directory for adding overrides on top of matrixos.conf" > "${T}"/README
 	doins "${T}/README"
 
+	# Install the repo pubkekys in /etc/matrixos/pubkeys, for use by vector in client mode.
+	dodir /etc/matrixos
+	insinto /etc/matrixos
+	cd "${S}" || die
+	doins -r pubkeys
+
+	dodir /etc/matrixos/image
+	insinto /etc/matrixos/image
+	cd "${S}" || die
+	doins -r image/hooks
+
 	mv "${S}/conf/matrixos.conf" "${S}/conf/matrixos.conf.example" || die
 	rm -rf "${S}/vendor"
+	rm -rf "${S}/matrixos-${P}"
 
 	dodir /usr/lib/matrixos
 	insinto /usr/lib/matrixos
-	cd "${S}"
+	cd "${S}" || die
 	doins -r .
 }
