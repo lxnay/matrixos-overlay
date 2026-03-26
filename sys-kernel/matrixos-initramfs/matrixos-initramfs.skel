@@ -51,6 +51,12 @@ src_prepare() {
 }
 
 src_install() {
+	local modulesdir="${ROOT}/lib/modules/${KV_FULL}"
+	local image="${modulesdir}/vmlinuz"
+
+	local srcmodulesdir="${ED}/lib/modules/${KV_FULL}"
+	local initramfs="${srcmodulesdir}/initramfs"
+
 	if use ostree && use initramfs && ! use generic-uki; then
 		elog "OSTree and Initramfs support enabled (generic-uki disabled)"
 		elog "Building ${initramfs}..."
@@ -58,12 +64,6 @@ src_install() {
 		elog "OSTree and Initramfs support disabled, not building initramfs"
 		return 0
 	fi
-
-	local modulesdir="${ROOT}/lib/modules/${KV_FULL}"
-	local image="${modulesdir}/vmlinuz"
-
-	local srcmodulesdir="${ED}/lib/modules/${KV_FULL}"
-	local initramfs="${srcmodulesdir}/initramfs"
 
 	einfo "Creating ${srcmodulesdir} ..."
 	mkdir -p "${srcmodulesdir}" || die
