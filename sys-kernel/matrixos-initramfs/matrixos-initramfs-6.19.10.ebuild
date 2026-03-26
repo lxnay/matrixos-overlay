@@ -17,7 +17,7 @@ SLOT="${PV}"
 S="${WORKDIR}"
 
 CDEPEND="
-	=sys-kernel/matrixos-kernel-${PVR}[ostree=,generic-uki=,initramfs=]
+	~sys-kernel/matrixos-kernel-${PV}[ostree=,generic-uki=,initramfs=]
 	ostree? ( initramfs? ( !generic-uki? (
 		>=sys-kernel/linux-firmware-20251124
 		app-crypt/tpm2-tools

@@ -192,10 +192,10 @@ BDEPEND="
 	${MATRIXOS_COMMON_DEPEND}
 "
 RDEPEND="${RDEPEND}
-	~sys-kernel/matrixos-kconfig-${PV}:0
+	${MATRIXOS_COMMON_DEPEND}
 "
 PDEPEND="${PDEPEND}
-	=sys-kernel/matrixos-initramfs-${PVR}[ostree=,generic-uki=,initramfs=]
+	~sys-kernel/matrixos-initramfs-${PV}[ostree=,generic-uki=,initramfs=]
 "
 MATRIXOS_MYVERSION="-${PN%%-*}"
 
