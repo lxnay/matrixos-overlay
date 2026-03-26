@@ -10,6 +10,7 @@ fi
 
 packages=(
 	sys-kernel/matrixos-kernel
+	sys-kernel/matrixos-initramfs
 	sys-kernel/matrixos-kconfig
 	virtual/dist-kernel
 )
