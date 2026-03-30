@@ -10,13 +10,14 @@ SRC_URI=""
 KEYWORDS="~amd64"
 # matrixOS requires initramfs to be built and installed into usr/lib/modules/$kver.
 # As this is the location supported by ostree.
-IUSE="${IUSE} ostree +dracut-userconf generic-uki initramfs"
+IUSE="${IUSE} ostree +dracut-userconf generic-uki initramfs slim-initramfs"
 
 KV_FULL="${PV}-matrixos"
 SLOT="${PV}"
 S="${WORKDIR}"
 
 CDEPEND="
+	~sys-kernel/matrixos-kconfig-${PV}[slim-initramfs=]
 	~sys-kernel/matrixos-kernel-${PV}[ostree=,generic-uki=,initramfs=]
 	ostree? ( initramfs? ( !generic-uki? (
 		>=sys-kernel/linux-firmware-20251124
@@ -68,6 +69,9 @@ src_install() {
 	einfo "Creating ${srcmodulesdir} ..."
 	mkdir -p "${srcmodulesdir}" || die
 
+	# For posterity
+	dodir /etc/dracut.conf.d
+
 	local dracut_args=()
 	if ! use dracut-userconf; then
 		local dracutconf="${T}"/empty-file
@@ -103,10 +107,16 @@ src_install() {
 	)
 	# nvidia might go out of sync if we add it? Also these
 	# drivers can add huge firmware files
-	local dracut_omit_drivers=(
-		nvidia
-		# amdgpu i915 nfp nouveau nvidia xe
-	)
+	local dracut_omit_drivers=()
+	if use slim-initramfs; then
+		dracut_omit_drivers+=(
+			nvidia
+			nvidia_drm
+			nvidia_modeset
+			nouveau
+			# TODO: test and add "amdgpu i915 nfp xe" here.
+		)
+	fi
 	dracut_args+=(
 		--kernel-image="${image}"
 		--kmoddir="${modulesdir}"
@@ -118,7 +128,7 @@ src_install() {
 		--no-hostonly-cmdline
 		--no-hostonly-i18n
 		--no-machineid
-		--nostrip
+		--strip
 		--no-uefi
 		--early-microcode
 		--reproducible
