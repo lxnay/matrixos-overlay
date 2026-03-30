@@ -17,7 +17,10 @@ KEYWORDS="amd64"
 IUSE="+ntfsplus slim-initramfs"
 
 src_install() {
-	# 1. Create the destination directory
+	# For posterity
+	dodir /etc/dracut.conf.d
+
+	# Create the destination directory
 	insinto /etc/kernel/config.d
 	doins "${FILESDIR}/00-matrixos.config"
 
