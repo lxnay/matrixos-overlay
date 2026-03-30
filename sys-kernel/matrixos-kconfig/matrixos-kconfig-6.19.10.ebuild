@@ -14,7 +14,7 @@ S="${WORKDIR}"
 LICENSE="GPL-2"
 SLOT="0"
 KEYWORDS="amd64"
-IUSE="+ntfsplus"
+IUSE="+ntfsplus slim-initramfs"
 
 src_install() {
 	# 1. Create the destination directory
@@ -23,6 +23,11 @@ src_install() {
 
 	use ntfsplus && doins "${FILESDIR}/00-matrixos-ntfsplus.config"
 	use ntfsplus && udev_dorules "${FILESDIR}"/*.rules
+
+	if use slim-initramfs; then
+		insinto /etc/kernel/config.d
+		doins "${FILESDIR}/00-matrixos-simpledrm.config"
+	fi
 
 	dodir /etc/repart.d
 	insinto /etc/repart.d
@@ -37,4 +42,12 @@ src_install() {
 	dodir /etc/systemd/system/systemd-growfs-root.service.d
 	insinto /etc/systemd/system/systemd-growfs-root.service.d
 	doins "${FILESDIR}/systemd-growfs-root.service.d.override.conf"
+}
+
+pkg_postinst() {
+	udev_reload
+}
+
+pkg_postrm() {
+	udev_reload
 }
