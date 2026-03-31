@@ -20,14 +20,16 @@ CDEPEND="
 	~sys-kernel/matrixos-kconfig-${PV}[slim-initramfs=]
 	~sys-kernel/matrixos-kernel-${PV}[ostree=,generic-uki=,initramfs=]
 	ostree? ( initramfs? ( !generic-uki? (
+		!slim-initramfs? (
+			app-crypt/tpm2-tools
+			net-fs/cifs-utils
+			net-fs/nfs-utils
+			net-misc/networkmanager
+			net-misc/dhcp
+			sys-block/nbd
+		)
 		>=sys-kernel/linux-firmware-20251124
-		app-crypt/tpm2-tools
 		app-misc/jq
-		net-fs/nfs-utils
-		net-fs/cifs-utils
-		net-misc/dhcp
-		net-misc/networkmanager
-		sys-block/nbd
 		sys-apps/nvme-cli
 		sys-apps/rng-tools
 		sys-apps/systemd[cryptsetup]
@@ -90,20 +92,31 @@ src_install() {
 
 	local dracut_modules=(
 		base bash btrfs cifs crypt crypt-gpg crypt-loop dbus dbus-daemon
-		dm dmraid dmsquash-live dracut-systemd drm fido2 i18n fs-lib kernel-modules
-		kernel-network-modules kernel-modules-extra lunmask lvm nbd
-		mdraid modsign network network-manager nfs nvdimm nvmf ostree
-		pkcs11 plymouth qemu qemu-net resume rngd rootfs-block shutdown
+		dm dmraid dmsquash-live dracut-systemd drm fido2 i18n fs-lib
+		kernel-modules kernel-modules-extra lunmask lvm
+		mdraid modsign nvdimm nvmf ostree pkcs11 plymouth qemu qemu-net
+		resume rngd rootfs-block shutdown terminfo usrmount virtiofs
 		systemd systemd-ac-power systemd-ask-password systemd-cryptsetup
 		systemd-initrd systemd-integritysetup systemd-repart
-		systemd-sysusers systemd-udevd systemd-veritysetup terminfo
-		tpm2-tss udev-rules uefi-lib usrmount virtiofs
+		systemd-sysusers systemd-udevd systemd-veritysetup
+		udev-rules uefi-lib
 	)
+	if ! use slim-initramfs; then
+		dracut_modules+=(
+			nbd
+			kernel-network-modules
+			network
+			network-manager
+			nfs
+			systemd-networkd
+			tpm2-tss
+		)
+	fi
 	local _uki_specific_ignored_dracut_modules=(
 		systemd-pcrphase pcsc
 	)
 	local dracut_drivers=(
-		virtio-gpu amdgpu xe i915 nfp
+		virtio-gpu nfp
 	)
 	# nvidia might go out of sync if we add it? Also these
 	# drivers can add huge firmware files
@@ -114,7 +127,10 @@ src_install() {
 			nvidia_drm
 			nvidia_modeset
 			nouveau
-			# TODO: test and add "amdgpu i915 nfp xe" here.
+			radeon
+			amdgpu
+			i915
+			xe
 		)
 	fi
 	dracut_args+=(
