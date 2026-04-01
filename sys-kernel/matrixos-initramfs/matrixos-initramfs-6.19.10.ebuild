@@ -25,14 +25,14 @@ CDEPEND="
 			net-fs/cifs-utils
 			net-fs/nfs-utils
 			net-misc/networkmanager
-			net-misc/dhcp
-			sys-block/nbd
 		)
 		>=sys-kernel/linux-firmware-20251124
 		app-misc/jq
+		net-misc/dhcp
 		sys-apps/nvme-cli
 		sys-apps/rng-tools
 		sys-apps/systemd[cryptsetup]
+		sys-block/nbd
 		sys-boot/plymouth
 		sys-fs/btrfs-progs
 		sys-fs/dmraid
@@ -91,24 +91,21 @@ src_install() {
 	fi
 
 	local dracut_modules=(
-		base bash btrfs cifs crypt crypt-gpg crypt-loop dbus dbus-daemon
+		base bash btrfs crypt crypt-gpg crypt-loop dbus dbus-daemon
 		dm dmraid dmsquash-live dracut-systemd drm fido2 i18n fs-lib
-		kernel-modules kernel-modules-extra lunmask lvm
-		mdraid modsign nvdimm nvmf ostree pkcs11 plymouth qemu qemu-net
+		kernel-modules kernel-network-modules kernel-modules-extra lunmask lvm
+		mdraid modsign nbd network nvdimm nvmf ostree pkcs11 plymouth qemu qemu-net
 		resume rngd rootfs-block shutdown terminfo usrmount virtiofs
 		systemd systemd-ac-power systemd-ask-password systemd-cryptsetup
-		systemd-initrd systemd-integritysetup systemd-repart
+		systemd-initrd systemd-integritysetup systemd-networkd systemd-repart
 		systemd-sysusers systemd-udevd systemd-veritysetup
 		udev-rules uefi-lib
 	)
 	if ! use slim-initramfs; then
 		dracut_modules+=(
-			nbd
-			kernel-network-modules
-			network
+			cifs
 			network-manager
 			nfs
-			systemd-networkd
 			tpm2-tss
 		)
 	fi
