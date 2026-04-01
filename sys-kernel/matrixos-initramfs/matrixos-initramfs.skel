@@ -19,6 +19,8 @@ S="${WORKDIR}"
 CDEPEND="
 	~sys-kernel/matrixos-kconfig-${PV}[slim-initramfs=]
 	~sys-kernel/matrixos-kernel-${PV}[ostree=,generic-uki=,initramfs=]
+"
+BDEPEND="${CDEPEND}
 	ostree? ( initramfs? ( !generic-uki? (
 		!slim-initramfs? (
 			app-crypt/tpm2-tools
@@ -26,7 +28,6 @@ CDEPEND="
 			net-fs/nfs-utils
 			net-misc/networkmanager
 		)
-		>=sys-kernel/linux-firmware-20251124
 		app-misc/jq
 		net-misc/dhcp
 		sys-apps/nvme-cli
@@ -38,11 +39,11 @@ CDEPEND="
 		sys-fs/dmraid
 		sys-fs/mdadm
 		sys-fs/multipath-tools
+		>=sys-kernel/linux-firmware-20251124
 		dev-util/ostree[dracut]
 	) ) )
 "
 RDEPEND="${CDEPEND}"
-BDEPEND="${CDEPEND}"
 PDEPEND="=virtual/dist-kernel-${PV}"
 
 src_unpack() {
