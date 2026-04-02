@@ -1,0 +1,1274 @@
+From c95bcd8356dd15590b0df2efab5c1b9a66eee10b Mon Sep 17 00:00:00 2001
+From: Ricardo Salveti <ricardo@foundries.io>
+Date: Wed, 1 Jun 2022 17:18:06 -0300
+Subject: [PATCH 1/4] sysroot: Support for directories instead of symbolic
+ links in boot part
+
+Allow manipulating and updating /boot/loader entries under a normal
+directory, as well as using symbolic links.
+
+In directory mode, a fixed staging directory loader.tmp is used instead
+of alternating between loader.0 and loader.1.  The atomic swap is done
+via renameat2(RENAME_EXCHANGE) between loader.tmp and the live loader
+directory.  After the exchange the stale loader.tmp is removed.  This
+avoids the need to track which numbered directory is active via an
+ostree_bootversion file.
+
+The current bootversion is derived from the ostree= kernel argument
+found in the live loader/entries/*.conf files rather than from a
+dedicated tracking file.
+
+During deployment, _ostree_sysroot_read_boot_loader_configs() prefers
+loader.tmp/entries when it exists (i.e. while staging is in progress)
+so that bootloader write_config callbacks read the new BLS entries
+rather than the stale live ones.
+
+Non-ostree BLS entries (e.g. from a dual-boot setup) are copied from
+the live loader/entries/ into the staging loader.tmp/entries/ so they
+are preserved across each atomic swap.
+
+loader.conf is also copied from the live loader/ into loader.tmp/ so
+bootloaders like systemd-boot that rely on it continue to work after
+each swap.
+
+/boot/loader as a normal directory is needed by systemd-boot support,
+and can be stored under the EFI ESP vfat partition.
+
+Based on the original implementation done by Valentin David [1].
+
+[1] https://github.com/ostreedev/ostree/pull/1967
+
+Signed-off-by: Ricardo Salveti <ricardo@foundries.io>
+Signed-off-by: Jose Quaresma <jose.quaresma@foundries.io>
+Signed-off-by: Igor Opaniuk <igor.opaniuk@foundries.io>
+---
+ src/libostree/ostree-sysroot-deploy.c | 256 +++++++++++++++++++++++---
+ src/libostree/ostree-sysroot.c        | 135 ++++++++++++--
+ src/libotcore/otcore-prepare-root.c   |   5 +-
+ 3 files changed, 350 insertions(+), 46 deletions(-)
+
+diff --git a/src/libostree/ostree-sysroot-deploy.c b/src/libostree/ostree-sysroot-deploy.c
+index 1dbaaa7e9d..d96980f02b 100644
+--- a/src/libostree/ostree-sysroot-deploy.c
++++ b/src/libostree/ostree-sysroot-deploy.c
+@@ -107,6 +107,13 @@ sysroot_flags_to_copy_flags (GLnxFileCopyFlags defaults, OstreeSysrootDebugFlags
+   return defaults;
+ }
+ 
++/* Create the symlink boot/boot. Sets errno on failure. */
++static int
++create_bootself_link (OstreeSysroot *self)
++{
++  return TEMP_FAILURE_RETRY (symlinkat (".", self->sysroot_fd, "boot/boot"));
++}
++
+ /* Try a hardlink if we can, otherwise fall back to copying.  Used
+  * right now for kernels/initramfs/device trees in /boot, where we can just
+  * hardlink if we're on the same partition.
+@@ -1831,8 +1838,9 @@ bootloader_entry_filename (OstreeSysroot *sysroot, guint n_deployments,
+  */
+ static gboolean
+ install_deployment_kernel (OstreeSysroot *sysroot, int new_bootversion,
+-                           OstreeDeployment *deployment, guint n_deployments, gboolean show_osname,
+-                           GCancellable *cancellable, GError **error)
++                           const char *boot_entries_dir, OstreeDeployment *deployment,
++                           guint n_deployments, gboolean show_osname, GCancellable *cancellable,
++                           GError **error)
+ 
+ {
+   GLNX_AUTO_PREFIX_ERROR ("Installing kernel", error);
+@@ -1858,7 +1866,9 @@ install_deployment_kernel (OstreeSysroot *sysroot, int new_bootversion,
+   const char *osname = ostree_deployment_get_osname (deployment);
+   const char *bootcsum = ostree_deployment_get_bootcsum (deployment);
+   g_autofree char *bootcsumdir = g_strdup_printf ("ostree/%s-%s", osname, bootcsum);
+-  g_autofree char *bootconfdir = g_strdup_printf ("loader.%d/entries", new_bootversion);
++  /* boot_entries_dir is relative to boot_fd; in symlink mode it is loader.N/entries,
++   * in directory mode it is loader.tmp/entries. */
++  const char *bootconfdir = boot_entries_dir;
+ 
+   if (!glnx_shutil_mkdir_p_at (sysroot->boot_fd, bootcsumdir, 0775, cancellable, error))
+     return FALSE;
+@@ -2188,11 +2198,10 @@ prepare_new_bootloader_link (OstreeSysroot *sysroot, int current_bootversion, in
+   g_assert ((current_bootversion == 0 && new_bootversion == 1)
+             || (current_bootversion == 1 && new_bootversion == 0));
+ 
+-  /* This allows us to support both /boot on a seperate filesystem to / as well
++  /* This allows us to support both /boot on a separate filesystem to / as well
+    * as on the same filesystem. */
+-  if (TEMP_FAILURE_RETRY (symlinkat (".", sysroot->sysroot_fd, "boot/boot")) < 0)
+-    if (errno != EEXIST)
+-      return glnx_throw_errno_prefix (error, "symlinkat");
++  if (create_bootself_link (sysroot) < 0 && errno != EEXIST)
++    return glnx_throw_errno_prefix (error, "Creating bootself link");
+ 
+   g_autofree char *new_target = g_strdup_printf ("loader.%d", new_bootversion);
+ 
+@@ -2204,10 +2213,114 @@ prepare_new_bootloader_link (OstreeSysroot *sysroot, int current_bootversion, in
+   return TRUE;
+ }
+ 
++/* We generate the directory on disk (loader.tmp), then potentially do a syncfs() to ensure
++ * that it (and everything else we wrote) has hit disk. Only after that do we rename it into
++ * place (via renameat2 RENAME_EXCHANGE with loader).
++ *
++ * The ostree BLS entries are already written into loader.tmp/entries by install_deployment_kernel
++ * before this function is called; here we copy over the remaining content (loader.conf,
++ * entries.srel, and any non-ostree third-party BLS entries) so the new directory is complete.
++ */
++static gboolean
++prepare_new_bootloader_dir (OstreeSysroot *sysroot, GCancellable *cancellable, GError **error)
++{
++  GLNX_AUTO_PREFIX_ERROR ("Preparing bootloader directory", error);
++
++  if (!_ostree_sysroot_ensure_boot_fd (sysroot, error))
++    return FALSE;
++
++  /* This allows us to support both /boot on a separate filesystem to / as well
++   * as on the same filesystem. Allowed to fail with EPERM on ESP/vfat.
++   */
++  if (create_bootself_link (sysroot) < 0 && !G_IN_SET (errno, EEXIST, EPERM))
++    return glnx_throw_errno_prefix (error, "Creating bootself link");
++
++  /* Copy non-ostree content from the current loader directory (loader.conf) so
++   * that after the atomic exchange the new loader dir still has files that other
++   * bootloaders (e.g. systemd-boot) require.
++   * Paths are relative to boot_fd; "loader/" prefix is the current active directory.
++   */
++  {
++    struct stat stbuf;
++    const char *src = "loader/loader.conf";
++    if (!glnx_fstatat_allow_noent (sysroot->boot_fd, src, &stbuf, AT_SYMLINK_NOFOLLOW, error))
++      return FALSE;
++    if (errno != ENOENT)
++      {
++        if (!glnx_file_copy_at (sysroot->boot_fd, src, &stbuf, sysroot->boot_fd,
++                                "loader.tmp/loader.conf", GLNX_FILE_COPY_OVERWRITE, cancellable,
++                                error))
++          return FALSE;
++      }
++  }
++
++  /* Always write entries.srel to mark the directory as BLS type1 compliant.
++   * We write it unconditionally rather than copying from the current loader dir
++   * so that it is guaranteed to be present even on first deployment or when
++   * migrating from symlink mode where it may not have existed before.
++   */
++  {
++    static const char entries_srel_content[] = "type1\n";
++    if (!glnx_file_replace_contents_at (
++            sysroot->boot_fd, "loader.tmp/entries.srel", (const guint8 *)entries_srel_content,
++            strlen (entries_srel_content), GLNX_FILE_REPLACE_NODATASYNC, cancellable, error))
++      return FALSE;
++  }
++
++  /* Copy any third-party (non-ostree) BLS entries from loader/entries/ into
++   * loader.tmp/entries/ so they are preserved across the atomic directory swap.
++   * Ostree's own entries (ostree-*.conf) were already written by
++   * install_deployment_kernel and must not be duplicated here.
++   */
++  {
++    gboolean entries_exists;
++    g_auto (GLnxDirFdIterator) dfd_iter = {
++      0,
++    };
++    if (!ot_dfd_iter_init_allow_noent (sysroot->boot_fd, "loader/entries", &dfd_iter,
++                                       &entries_exists, error))
++      return FALSE;
++    if (entries_exists)
++      {
++        glnx_autofd int dest_entries_dfd = -1;
++        if (!glnx_opendirat (sysroot->boot_fd, "loader.tmp/entries", TRUE, &dest_entries_dfd,
++                             error))
++          return FALSE;
++
++        while (TRUE)
++          {
++            struct dirent *dent;
++            if (!glnx_dirfd_iterator_next_dent (&dfd_iter, &dent, cancellable, error))
++              return FALSE;
++            if (dent == NULL)
++              break;
++
++            /* Skip ostree-managed entries; they were written by install_deployment_kernel */
++            if (g_str_has_prefix (dent->d_name, "ostree-"))
++              continue;
++
++            struct stat stbuf;
++            if (!glnx_fstatat (dfd_iter.fd, dent->d_name, &stbuf, AT_SYMLINK_NOFOLLOW, error))
++              return FALSE;
++
++            if (!S_ISREG (stbuf.st_mode))
++              continue;
++
++            if (!glnx_file_copy_at (dfd_iter.fd, dent->d_name, &stbuf, dest_entries_dfd,
++                                    dent->d_name, GLNX_FILE_COPY_OVERWRITE, cancellable, error))
++              return glnx_prefix_error (error, "Copying non-ostree entry %s", dent->d_name);
++          }
++      }
++  }
++
++  return TRUE;
++}
++
+ /* Update the /boot/loader symlink to point to /boot/loader.$new_bootversion */
+ static gboolean
+-swap_bootloader (OstreeSysroot *sysroot, OstreeBootloader *bootloader, int current_bootversion,
+-                 int new_bootversion, GCancellable *cancellable, GError **error)
++swap_bootloader (OstreeSysroot *sysroot, OstreeBootloader *bootloader, gboolean loader_link,
++                 int current_bootversion, int new_bootversion, GCancellable *cancellable,
++                 GError **error)
+ {
+   GLNX_AUTO_PREFIX_ERROR ("Final bootloader swap", error);
+ 
+@@ -2216,16 +2329,27 @@ swap_bootloader (OstreeSysroot *sysroot, OstreeBootloader *bootloader, int curre
+ 
+   if (!_ostree_sysroot_ensure_boot_fd (sysroot, error))
+     return FALSE;
+-  g_assert_cmpint (sysroot->boot_fd, !=, -1);
+-  // We use symlinks here.
+-  g_assert (!sysroot->boot_is_vfat);
+ 
+-  /* The symlink was already written, and we used syncfs() to ensure
+-   * its data is in place.  Renaming now should give us atomic semantics;
+-   * see https://bugzilla.gnome.org/show_bug.cgi?id=755595
+-   */
+-  if (!glnx_renameat (sysroot->boot_fd, "loader.tmp", sysroot->boot_fd, "loader", error))
+-    return FALSE;
++  if (loader_link)
++    {
++      g_assert_cmpint (sysroot->boot_fd, !=, -1);
++
++      /* The symlink was already written, and we used syncfs() to ensure
++       * its data is in place.  Renaming now should give us atomic semantics;
++       * see https://bugzilla.gnome.org/show_bug.cgi?id=755595
++       */
++      if (!glnx_renameat (sysroot->boot_fd, "loader.tmp", sysroot->boot_fd, "loader", error))
++        return FALSE;
++    }
++  else
++    {
++      /* Atomically swap loader.tmp (the freshly-built directory) with the live
++       * loader directory.  After the exchange loader.tmp holds the old content
++       * which we remove below once the new state is safely on disk.
++       */
++      if (glnx_renameat2_exchange (sysroot->boot_fd, "loader.tmp", sysroot->boot_fd, "loader") != 0)
++        return glnx_throw_errno_prefix (error, "Exchanging loader.tmp and loader");
++    }
+ 
+   /* As grub doesn't support replaying XFS journal,
+    * we must fsfreeze/thaw again here:
+@@ -2244,6 +2368,16 @@ swap_bootloader (OstreeSysroot *sysroot, OstreeBootloader *bootloader, int curre
+   ot_journal_print (LOG_INFO, "Completed freeze/thaw cycle for boot in %" G_GUINT64_FORMAT " ms",
+                     end_msec - start_msec);
+ 
++  /* In the directory case, glnx_renameat2_exchange swaps loader.tmp and loader atomically,
++   * leaving the old loader content in loader.tmp. Now that the new state is safely on disk
++   * (after fsfreeze/thaw), remove the now-stale loader.tmp directory.
++   */
++  if (!loader_link)
++    {
++      if (!glnx_shutil_rm_rf_at (sysroot->boot_fd, "loader.tmp", cancellable, error))
++        return FALSE;
++    }
++
+   /* TODO: In the future also execute this automatically via a systemd unit
+    * if we detect it's necessary.
+    **/
+@@ -2401,8 +2535,58 @@ write_deployments_bootswap (OstreeSysroot *self, GPtrArray *new_deployments,
+ {
+   const int new_bootversion = self->bootversion ? 0 : 1;
+ 
+-  g_autofree char *new_loader_entries_dir
+-      = g_strdup_printf ("boot/loader.%d/entries", new_bootversion);
++  /* Determine whether boot/loader is a symlink (traditional ostree model) or a real directory
++   * (e.g. vfat/ESP with systemd-boot).  We need to know this up-front so we can choose the
++   * correct staging directory for the BLS entries written by install_deployment_kernel.
++   *
++   * In symlink mode the staging dir is boot/loader.N/entries (unchanged from before).
++   * In directory mode we always stage in boot/loader.tmp/entries and then atomically swap
++   * loader.tmp with loader via renameat2 RENAME_EXCHANGE.
++   */
++  if (!_ostree_sysroot_ensure_boot_fd (self, error))
++    return FALSE;
++
++  struct stat stbuf;
++  gboolean loader_link = FALSE;
++  gboolean force_type1_semantics = is_bootconfig_type1_semantics (self, cancellable, error);
++  if (!glnx_fstatat_allow_noent (self->sysroot_fd, "boot/loader", &stbuf, AT_SYMLINK_NOFOLLOW,
++                                 error))
++    return FALSE;
++  if (errno == ENOENT)
++    {
++      int r = create_bootself_link (self);
++      if (r < 0 && !G_IN_SET (errno, EEXIST, EPERM))
++        return glnx_throw_errno_prefix (error, "Creating bootself link");
++      /* If EPERM, symlinks not supported (e.g. vfat), use directory mode */
++      loader_link = !(r < 0 && errno == EPERM);
++    }
++  else if (S_ISLNK (stbuf.st_mode))
++    loader_link = TRUE;
++  else if (S_ISDIR (stbuf.st_mode))
++    loader_link = FALSE;
++  else
++    return glnx_throw (error, "boot/loader is neither a symlink nor a directory");
++
++  if (force_type1_semantics && loader_link)
++    return glnx_throw (error, "type1 semantics, but boot/loader is symlink");
++
++  /* In directory mode, always stage into loader.tmp/entries.
++   * In symlink mode, stage into loader.N/entries as before.
++   */
++  g_autofree char *new_loader_entries_dir = NULL;
++  /* boot_entries_dir is relative to boot_fd (used by install_deployment_kernel) */
++  g_autofree char *boot_entries_dir = NULL;
++  if (!loader_link)
++    {
++      new_loader_entries_dir = g_strdup ("boot/loader.tmp/entries");
++      boot_entries_dir = g_strdup ("loader.tmp/entries");
++    }
++  else
++    {
++      new_loader_entries_dir = g_strdup_printf ("boot/loader.%d/entries", new_bootversion);
++      boot_entries_dir = g_strdup_printf ("loader.%d/entries", new_bootversion);
++    }
++
+   if (!glnx_shutil_rm_rf_at (self->sysroot_fd, new_loader_entries_dir, cancellable, error))
+     return FALSE;
+   if (!glnx_shutil_mkdir_p_at (self->sysroot_fd, new_loader_entries_dir, 0755, cancellable, error))
+@@ -2425,8 +2609,8 @@ write_deployments_bootswap (OstreeSysroot *self, GPtrArray *new_deployments,
+   for (guint i = 0; i < new_deployments->len; i++)
+     {
+       OstreeDeployment *deployment = new_deployments->pdata[i];
+-      if (!install_deployment_kernel (self, new_bootversion, deployment, new_deployments->len,
+-                                      show_osname, cancellable, error))
++      if (!install_deployment_kernel (self, new_bootversion, boot_entries_dir, deployment,
++                                      new_deployments->len, show_osname, cancellable, error))
+         return FALSE;
+     }
+ 
+@@ -2447,13 +2631,28 @@ write_deployments_bootswap (OstreeSysroot *self, GPtrArray *new_deployments,
+         return glnx_prefix_error (error, "Bootloader write config");
+     }
+ 
+-  if (!prepare_new_bootloader_link (self, self->bootversion, new_bootversion, cancellable, error))
+-    return FALSE;
++  if (loader_link)
++    {
++      /* Default and when loader is a link is to swap links */
++      if (!prepare_new_bootloader_link (self, self->bootversion, new_bootversion, cancellable,
++                                        error))
++        return FALSE;
++    }
++  else
++    {
++      /* Handle boot/loader as a directory, and swap with renameat2 RENAME_EXCHANGE.
++       * The ostree BLS entries are already in loader.tmp/entries; this call copies over
++       * loader.conf, entries.srel, and any third-party BLS entries.
++       */
++      if (!prepare_new_bootloader_dir (self, cancellable, error))
++        return FALSE;
++    }
+ 
+   if (!full_system_sync (self, cancellable, error))
+     return FALSE;
+ 
+-  if (!swap_bootloader (self, bootloader, self->bootversion, new_bootversion, cancellable, error))
++  if (!swap_bootloader (self, bootloader, loader_link, self->bootversion, new_bootversion,
++                        cancellable, error))
+     return FALSE;
+ 
+   if (out_subbootdir)
+@@ -4307,9 +4506,12 @@ ostree_sysroot_deployment_set_kargs_in_place (OstreeSysroot *self, OstreeDeploym
+       g_autofree char *bootconf_filename
+           = bootloader_entry_filename (self, self->deployments->len, deployment);
+ 
+-      g_autofree char *bootconfdir = g_strdup_printf ("loader.%d/entries", self->bootversion);
++      /* In directory mode boot/loader is always the live directory, so entries live at
++       * loader/entries.  In symlink mode, loader -> loader.N, so loader/entries is still
++       * the right path (the symlink dereferences to loader.N/entries).
++       */
+       glnx_autofd int bootconf_dfd = -1;
+-      if (!glnx_opendirat (self->boot_fd, bootconfdir, TRUE, &bootconf_dfd, error))
++      if (!glnx_opendirat (self->boot_fd, "loader/entries", TRUE, &bootconf_dfd, error))
+         return FALSE;
+ 
+       if (!ostree_bootconfig_parser_write_at (new_bootconfig, bootconf_dfd, bootconf_filename,
+diff --git a/src/libostree/ostree-sysroot.c b/src/libostree/ostree-sysroot.c
+index 282df6d100..b5240927f0 100644
+--- a/src/libostree/ostree-sysroot.c
++++ b/src/libostree/ostree-sysroot.c
+@@ -348,8 +348,6 @@ validate_boot_fd (OstreeSysroot *self, int fd, GError **error)
+   if (fstatfs (fd, &stbuf) < 0)
+     return glnx_throw_errno_prefix (error, "fstatfs(boot)");
+   self->boot_is_vfat = (stbuf.f_type == MSDOS_SUPER_MAGIC);
+-  if (self->boot_is_vfat)
+-    return glnx_throw (error, "/boot cannot currently be a vfat filesystem");
+   return TRUE;
+ }
+ 
+@@ -653,6 +651,9 @@ compare_loader_configs_for_sorting (gconstpointer a_pp, gconstpointer b_pp)
+   return compare_boot_loader_configs (a, b);
+ }
+ 
++static gboolean read_current_bootversion (OstreeSysroot *self, int *out_bootversion,
++                                          GCancellable *cancellable, GError **error);
++
+ /* Read all the bootconfigs from `/boot/loader/`. */
+ gboolean
+ _ostree_sysroot_read_boot_loader_configs (OstreeSysroot *self, int bootversion,
+@@ -675,7 +676,44 @@ _ostree_sysroot_read_boot_loader_configs (OstreeSysroot *self, int bootversion,
+       return TRUE;
+     }
+ 
+-  g_autofree char *entries_path = g_strdup_printf ("loader.%d/entries", bootversion);
++  g_autofree char *entries_path = NULL;
++
++  /* In directory mode boot/loader is always the live state, so entries are always
++   * at loader/entries regardless of bootversion.  In symlink mode, loader points to
++   * loader.N where N == current_version; if the caller is asking for a different
++   * version (e.g. the previous one), we fall back to loader.N/entries directly.
++   */
++  struct stat loader_stbuf;
++  if (!glnx_fstatat_allow_noent (self->boot_fd, "loader", &loader_stbuf, AT_SYMLINK_NOFOLLOW,
++                                 error))
++    return FALSE;
++
++  if (errno == ENOENT || S_ISDIR (loader_stbuf.st_mode))
++    {
++      /* Directory mode (or no loader at all): prefer loader.tmp/entries when it exists
++       * (i.e. during deployment staging), otherwise use the live loader/entries.
++       */
++      struct stat tmp_stbuf;
++      if (!glnx_fstatat_allow_noent (self->boot_fd, "loader.tmp/entries", &tmp_stbuf,
++                                     AT_SYMLINK_NOFOLLOW, error))
++        return FALSE;
++      if (errno == 0 && S_ISDIR (tmp_stbuf.st_mode))
++        entries_path = g_strdup ("loader.tmp/entries");
++      else
++        entries_path = g_strdup ("loader/entries");
++    }
++  else
++    {
++      /* Symlink mode: check whether the requested bootversion is the current one */
++      int current_version;
++      if (!read_current_bootversion (self, &current_version, cancellable, error))
++        return FALSE;
++
++      if (current_version == bootversion)
++        entries_path = g_strdup ("loader/entries");
++      else
++        entries_path = g_strdup_printf ("loader.%d/entries", bootversion);
++    }
+   gboolean entries_exists;
+   g_auto (GLnxDirFdIterator) dfd_iter = {
+     0,
+@@ -722,7 +760,7 @@ _ostree_sysroot_read_boot_loader_configs (OstreeSysroot *self, int bootversion,
+   return TRUE;
+ }
+ 
+-/* Get the bootversion from the `/boot/loader` symlink. */
++/* Get the bootversion from the `/boot/loader` directory or symlink. */
+ static gboolean
+ read_current_bootversion (OstreeSysroot *self, int *out_bootversion, GCancellable *cancellable,
+                           GError **error)
+@@ -735,24 +773,87 @@ read_current_bootversion (OstreeSysroot *self, int *out_bootversion, GCancellabl
+     return FALSE;
+   if (errno == ENOENT)
+     {
+-      g_debug ("Didn't find $sysroot/boot/loader symlink; assuming bootversion 0");
++      g_debug ("Didn't find $sysroot/boot/loader directory or symlink; assuming bootversion 0");
+       ret_bootversion = 0;
+     }
+   else
+     {
+-      if (!S_ISLNK (stbuf.st_mode))
+-        return glnx_throw (error, "Not a symbolic link: boot/loader");
+-
+-      g_autofree char *target
+-          = glnx_readlinkat_malloc (self->sysroot_fd, "boot/loader", cancellable, error);
+-      if (!target)
+-        return FALSE;
+-      if (g_strcmp0 (target, "loader.0") == 0)
+-        ret_bootversion = 0;
+-      else if (g_strcmp0 (target, "loader.1") == 0)
+-        ret_bootversion = 1;
++      if (S_ISLNK (stbuf.st_mode))
++        {
++          /* Traditional link, check version by reading link name */
++          g_autofree char *target
++              = glnx_readlinkat_malloc (self->sysroot_fd, "boot/loader", cancellable, error);
++          if (!target)
++            return FALSE;
++          if (g_strcmp0 (target, "loader.0") == 0)
++            ret_bootversion = 0;
++          else if (g_strcmp0 (target, "loader.1") == 0)
++            ret_bootversion = 1;
++          else
++            return glnx_throw (error, "Invalid target '%s' in boot/loader", target);
++        }
+       else
+-        return glnx_throw (error, "Invalid target '%s' in boot/loader", target);
++        {
++          /* boot/loader is a real directory (e.g. vfat/ESP).  The directory is always the live
++           * state after each atomic swap, so there is no loader.N indirection to follow.
++           * Determine the bootversion by reading an ostree-*.conf entry from loader/entries/
++           * and parsing the ostree= kernel argument it contains.  If no entries exist yet
++           * (e.g. fresh install before first deployment), default to 0.
++           */
++          if (!_ostree_sysroot_maybe_load_boot_fd (self, error))
++            return FALSE;
++
++          ret_bootversion = 0;
++          if (self->boot_fd != -1)
++            {
++              gboolean entries_exists;
++              g_auto (GLnxDirFdIterator) dfd_iter = {
++                0,
++              };
++              if (!ot_dfd_iter_init_allow_noent (self->boot_fd, "loader/entries", &dfd_iter,
++                                                 &entries_exists, error))
++                return FALSE;
++
++              if (entries_exists)
++                {
++                  struct dirent *dent;
++                  /* Find the first ostree-*.conf entry and parse its ostree= argument */
++                  while (TRUE)
++                    {
++                      if (!glnx_dirfd_iterator_next_dent (&dfd_iter, &dent, cancellable, error))
++                        return FALSE;
++                      if (dent == NULL)
++                        break;
++
++                      if (!g_str_has_prefix (dent->d_name, "ostree-")
++                          || !g_str_has_suffix (dent->d_name, ".conf"))
++                        continue;
++
++                      g_autoptr (OstreeBootconfigParser) config = ostree_bootconfig_parser_new ();
++                      if (!ostree_bootconfig_parser_parse_at (config, dfd_iter.fd, dent->d_name,
++                                                              cancellable, error))
++                        return glnx_prefix_error (error, "Parsing %s", dent->d_name);
++
++                      const char *options = ostree_bootconfig_parser_get (config, "options");
++                      if (!options)
++                        continue;
++
++                      g_autoptr (OstreeKernelArgs) kargs = ostree_kernel_args_from_string (options);
++                      const char *ostree_arg = ostree_kernel_args_get_last_value (kargs, "ostree");
++                      if (!ostree_arg)
++                        continue;
++
++                      int entry_bootversion = 0;
++                      if (!_ostree_sysroot_parse_bootlink (ostree_arg, &entry_bootversion, NULL,
++                                                           NULL, NULL, error))
++                        return FALSE;
++
++                      ret_bootversion = entry_bootversion;
++                      break;
++                    }
++                }
++            }
++        }
+     }
+ 
+   *out_bootversion = ret_bootversion;
+diff --git a/src/libotcore/otcore-prepare-root.c b/src/libotcore/otcore-prepare-root.c
+index 8eaedd47a5..5e67a2d0d0 100644
+--- a/src/libotcore/otcore-prepare-root.c
++++ b/src/libotcore/otcore-prepare-root.c
+@@ -455,9 +455,10 @@ otcore_mount_boot (const char *physical_root, const char *deployment, GError **e
+   struct stat stbuf;
+ 
+   /* If /boot is on the same partition, use a bind mount to make it visible
+-   * at /boot inside the deployment.
++   * at /boot inside the deployment. Supports both symlink and directory for
++   * boot/loader (the latter is needed for e.g. vfat ESP partitions).
+    */
+-  if (!(lstat (boot_loader, &stbuf) == 0 && S_ISLNK (stbuf.st_mode)))
++  if (!(lstat (boot_loader, &stbuf) == 0 && (S_ISLNK (stbuf.st_mode) || S_ISDIR (stbuf.st_mode))))
+     return TRUE;
+ 
+   g_autofree char *target_boot = g_build_filename (deployment, "boot", NULL);
+
+From eda6a9869d46607badd3836f52bb1bf7abcfa762 Mon Sep 17 00:00:00 2001
+From: Igor Opaniuk <igor.opaniuk@foundries.io>
+Date: Wed, 8 Jan 2025 15:53:31 +0100
+Subject: [PATCH 2/4] sysroot: Support for standard-conformance marker file
+
+Add support for standard-conformance marker file loader/entries.srel.
+
+There might be implementations of boot loading infrastructure that are
+also using the /loader/entries/ directory, but install files that do
+not follow the [1] specification. In order to minimize confusion, a boot
+loader implementation may place the file /loader/entries.srel next to the
+/loader/entries/ directory containing the ASCII string type1 (followed
+by a UNIX newline). Tools that need to determine whether an existing
+directory implements the semantics described here may check for this
+file and contents: if it exists and contains the mentioned string,
+it shall assume a standards-compliant implementation is in place.
+If it exists but contains a different string it shall assume other
+semantics are implemented. If the file does not exist, no assumptions
+should be made.
+
+[1] https://uapi-group.org/specifications/specs/boot_loader_specification/#type-1-boot-loader-entry-keys
+Signed-off-by: Igor Opaniuk <igor.opaniuk@foundries.io>
+---
+ src/libostree/ostree-sysroot-deploy.c | 47 +++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/src/libostree/ostree-sysroot-deploy.c b/src/libostree/ostree-sysroot-deploy.c
+index d96980f02b..d4c89e0bb2 100644
+--- a/src/libostree/ostree-sysroot-deploy.c
++++ b/src/libostree/ostree-sysroot-deploy.c
+@@ -2186,6 +2186,53 @@ install_deployment_kernel (OstreeSysroot *sysroot, int new_bootversion,
+   return TRUE;
+ }
+ 
++/* Determine whether an existing directory implements the semantics described in
++ * https://uapi-group.org/specifications/specs/boot_loader_specification/#type-1-boot-loader-entry-keys
++ */
++static gboolean
++is_bootconfig_type1_semantics (OstreeSysroot *sysroot, GCancellable *cancellable, GError **error)
++{
++  struct stat stbuf;
++
++  if (!_ostree_sysroot_ensure_boot_fd (sysroot, error))
++    return FALSE;
++
++  if (!glnx_fstatat_allow_noent (sysroot->boot_fd, "loader/entries.srel", &stbuf,
++                                 AT_SYMLINK_NOFOLLOW, error))
++    return FALSE;
++
++  if (errno == ENOENT)
++    {
++      g_debug ("Didn't find loader/entries.srel file");
++      return FALSE;
++    }
++  else
++    {
++      /* Get semantics type by reading loader/entries.srel */
++      gsize len;
++      g_autofree char *type = glnx_file_get_contents_utf8_at (
++          sysroot->boot_fd, "loader/entries.srel", &len, cancellable, NULL);
++      if (type == NULL)
++        {
++          g_debug ("Invalid loader/entries.srel file");
++          return FALSE;
++        }
++
++      if (g_str_has_prefix (type, "type1"))
++        {
++          g_debug ("type1 semantics is found in loader/entries.srel file");
++          return TRUE;
++        }
++      else
++        {
++          g_debug ("Unsupported semantics type ('%s') in loader/entries.srel file", type);
++          return FALSE;
++        }
++    }
++
++  return FALSE;
++}
++
+ /* We generate the symlink on disk, then potentially do a syncfs() to ensure
+  * that it (and everything else we wrote) has hit disk. Only after that do we
+  * rename it into place.
+
+From c156b79c35827f0271dce0e97f9c467c0f8a1e8a Mon Sep 17 00:00:00 2001
+From: Igor Opaniuk <igor.opaniuk@foundries.io>
+Date: Mon, 9 Mar 2026 15:23:08 +0100
+Subject: [PATCH 3/4] bootloaders: Write config to loader.tmp in directory mode
+
+In directory mode the staging area for the new boot configuration is
+boot/loader.tmp, not boot/loader.N. The sysroot deploy code already
+creates loader.tmp and writes BLS entries there before invoking
+_ostree_bootloader_write_config(), but the syslinux, grub2 (non-EFI),
+and uboot backends each hard-coded boot/loader.N/<config-file> as the
+output path, causing an open(O_TMPFILE) failure because the
+boot/loader.N/ directory does not exist in directory mode.
+
+Fix each affected backend to detect whether boot/loader is a real
+directory (directory mode) or a symlink (classic mode) via
+glnx_fstatat_allow_noent(), and write to boot/loader.tmp/<config-file>
+in the former case.
+
+The ostree-grub-generator script derives its BLS entries directory from
+the parent directory of the grub.cfg output path, so pointing it at
+boot/loader.tmp/grub.cfg automatically causes it to read the new
+entries from boot/loader.tmp/entries/ - the correct staging location.
+---
+ src/libostree/ostree-bootloader-grub2.c    | 15 +++++++++++++--
+ src/libostree/ostree-bootloader-syslinux.c | 12 +++++++++++-
+ src/libostree/ostree-bootloader-uboot.c    | 12 +++++++++++-
+ 3 files changed, 35 insertions(+), 4 deletions(-)
+
+diff --git a/src/libostree/ostree-bootloader-grub2.c b/src/libostree/ostree-bootloader-grub2.c
+index f2d73d33b4..09cb805a24 100644
+--- a/src/libostree/ostree-bootloader-grub2.c
++++ b/src/libostree/ostree-bootloader-grub2.c
+@@ -411,8 +411,19 @@ _ostree_bootloader_grub2_write_config (OstreeBootloader *bootloader, int bootver
+     }
+   else
+     {
+-      new_config_path = ot_gfile_resolve_path_printf (self->sysroot->path,
+-                                                      "boot/loader.%d/grub.cfg", bootversion);
++      /* In directory mode boot/loader is a real directory; staging happens in loader.tmp.
++       * In symlink mode staging happens in loader.N.
++       */
++      struct stat loader_stbuf;
++      if (!glnx_fstatat_allow_noent (self->sysroot->sysroot_fd, "boot/loader", &loader_stbuf,
++                                     AT_SYMLINK_NOFOLLOW, error))
++        return FALSE;
++      gboolean loader_is_dir = (errno == 0 && S_ISDIR (loader_stbuf.st_mode));
++      new_config_path
++          = loader_is_dir
++                ? ot_gfile_resolve_path_printf (self->sysroot->path, "boot/loader.tmp/grub.cfg")
++                : ot_gfile_resolve_path_printf (self->sysroot->path, "boot/loader.%d/grub.cfg",
++                                                bootversion);
+     }
+ 
+   const char *grub_argv[4] = { NULL, "-o", NULL, NULL };
+diff --git a/src/libostree/ostree-bootloader-syslinux.c b/src/libostree/ostree-bootloader-syslinux.c
+index dca0a0070f..770731225c 100644
+--- a/src/libostree/ostree-bootloader-syslinux.c
++++ b/src/libostree/ostree-bootloader-syslinux.c
+@@ -111,7 +111,17 @@ _ostree_bootloader_syslinux_write_config (OstreeBootloader *bootloader, int boot
+ {
+   OstreeBootloaderSyslinux *self = OSTREE_BOOTLOADER_SYSLINUX (bootloader);
+ 
+-  g_autofree char *new_config_path = g_strdup_printf ("boot/loader.%d/syslinux.cfg", bootversion);
++  /* In directory mode boot/loader is a real directory; staging happens in loader.tmp.
++   * In symlink mode staging happens in loader.N.
++   */
++  struct stat loader_stbuf;
++  if (!glnx_fstatat_allow_noent (self->sysroot->sysroot_fd, "boot/loader", &loader_stbuf,
++                                 AT_SYMLINK_NOFOLLOW, error))
++    return FALSE;
++  gboolean loader_is_dir = (errno == 0 && S_ISDIR (loader_stbuf.st_mode));
++  g_autofree char *new_config_path
++      = loader_is_dir ? g_strdup ("boot/loader.tmp/syslinux.cfg")
++                      : g_strdup_printf ("boot/loader.%d/syslinux.cfg", bootversion);
+ 
+   /* This should follow the symbolic link to the current bootversion. */
+   g_autofree char *config_contents = glnx_file_get_contents_utf8_at (
+diff --git a/src/libostree/ostree-bootloader-uboot.c b/src/libostree/ostree-bootloader-uboot.c
+index 41280cf198..9c0d4bf5d7 100644
+--- a/src/libostree/ostree-bootloader-uboot.c
++++ b/src/libostree/ostree-bootloader-uboot.c
+@@ -171,7 +171,17 @@ _ostree_bootloader_uboot_write_config (OstreeBootloader *bootloader, int bootver
+   if (!create_config_from_boot_loader_entries (self, bootversion, new_lines, cancellable, error))
+     return FALSE;
+ 
+-  g_autofree char *new_config_path = g_strdup_printf ("boot/loader.%d/uEnv.txt", bootversion);
++  /* In directory mode boot/loader is a real directory; staging happens in loader.tmp.
++   * In symlink mode staging happens in loader.N.
++   */
++  struct stat loader_stbuf;
++  if (!glnx_fstatat_allow_noent (self->sysroot->sysroot_fd, "boot/loader", &loader_stbuf,
++                                 AT_SYMLINK_NOFOLLOW, error))
++    return FALSE;
++  gboolean loader_is_dir = (errno == 0 && S_ISDIR (loader_stbuf.st_mode));
++  g_autofree char *new_config_path = loader_is_dir
++                                         ? g_strdup ("boot/loader.tmp/uEnv.txt")
++                                         : g_strdup_printf ("boot/loader.%d/uEnv.txt", bootversion);
+   g_autofree char *new_config_contents = _ostree_sysroot_join_lines (new_lines);
+   if (!glnx_file_replace_contents_at (self->sysroot->sysroot_fd, new_config_path,
+                                       (guint8 *)new_config_contents, strlen (new_config_contents),
+
+From 3018fd2c953d7e3212e01d3cecb250e164e37568 Mon Sep 17 00:00:00 2001
+From: Igor Opaniuk <igor.opaniuk@foundries.io>
+Date: Tue, 21 Jan 2025 13:05:37 +0100
+Subject: [PATCH 4/4] tests: directories instead of symbolic links in boot part
+
+Add tests for boot/loader directory.
+
+Signed-off-by: Igor Opaniuk <igor.opaniuk@foundries.io>
+---
+ Makefile-tests.am                       |  4 ++
+ tests/admin-test.sh                     | 72 +++++++++++++++++++---
+ tests/test-admin-deploy-grub2.sh        |  1 +
+ tests/test-admin-deploy-none.sh         |  1 +
+ tests/test-admin-deploy-syslinux.sh     |  1 +
+ tests/test-admin-deploy-uboot.sh        |  1 +
+ tests/test-admin-dir-deploy-grub2.sh    | 30 ++++++++++
+ tests/test-admin-dir-deploy-none.sh     | 53 +++++++++++++++++
+ tests/test-admin-dir-deploy-syslinux.sh | 71 ++++++++++++++++++++++
+ tests/test-admin-dir-deploy-uboot.sh    | 79 +++++++++++++++++++++++++
+ 10 files changed, 304 insertions(+), 9 deletions(-)
+ create mode 100755 tests/test-admin-dir-deploy-grub2.sh
+ create mode 100755 tests/test-admin-dir-deploy-none.sh
+ create mode 100755 tests/test-admin-dir-deploy-syslinux.sh
+ create mode 100755 tests/test-admin-dir-deploy-uboot.sh
+
+diff --git a/Makefile-tests.am b/Makefile-tests.am
+index e62d45d6cd..bf27646226 100644
+--- a/Makefile-tests.am
++++ b/Makefile-tests.am
+@@ -105,6 +105,7 @@ _installed_or_uninstalled_test_scripts = \
+ 	tests/test-admin-upgrade-endoflife.sh \
+ 	tests/test-admin-upgrade-systemd-update.sh \
+ 	tests/test-admin-deploy-syslinux.sh \
++	tests/test-admin-dir-deploy-syslinux.sh \
+ 	tests/test-admin-deploy-bootprefix.sh \
+ 	tests/test-admin-deploy-composefs.sh \
+ 	tests/test-admin-deploy-var.sh \
+@@ -113,9 +114,12 @@ _installed_or_uninstalled_test_scripts = \
+ 	tests/test-admin-deploy-switch.sh \
+ 	tests/test-admin-deploy-etcmerge-cornercases.sh \
+ 	tests/test-admin-deploy-uboot.sh \
++	tests/test-admin-dir-deploy-uboot.sh \
+ 	tests/test-admin-deploy-grub2.sh \
++	tests/test-admin-dir-deploy-grub2.sh \
+ 	tests/test-admin-deploy-nomerge.sh \
+ 	tests/test-admin-deploy-none.sh \
++	tests/test-admin-dir-deploy-none.sh \
+ 	tests/test-admin-deploy-bootid-gc.sh \
+ 	tests/test-admin-deploy-whiteouts.sh \
+ 	tests/test-admin-deploy-emptyetc.sh \
+diff --git a/tests/admin-test.sh b/tests/admin-test.sh
+index 079bd6cbcc..b3ab5b7bde 100644
+--- a/tests/admin-test.sh
++++ b/tests/admin-test.sh
+@@ -63,6 +63,20 @@ export rev
+ # This initial deployment gets kicked off with some kernel arguments.  We also set the initial
+ # timestamp of the deploy directory to the epoch as a regression test.
+ touch -d @0 sysroot/ostree/deploy
++
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    # Have loader as a directory (simulate ESP-based deployments)
++    if [ -h sysroot/boot/loader ]; then
++        loader=`readlink sysroot/boot/loader`
++        rm -f sysroot/boot/loader
++        mv sysroot/boot/${loader} sysroot/boot/loader
++        echo -n ${loader} > sysroot/boot/loader/ostree_bootversion
++    else
++        mkdir -p sysroot/boot/loader
++        echo -n "loader.0" > sysroot/boot/loader/ostree_bootversion
++    fi
++fi
++
+ ${CMD_PREFIX} ostree admin deploy --karg=root=LABEL=MOO --karg=quiet --os=testos testos:testos/buildmain/x86_64-runtime
+ new_mtime=$(stat -c '%.Y' sysroot/ostree/deploy)
+ assert_not_streq "${orig_mtime}" "${new_mtime}"
+@@ -105,7 +119,12 @@ echo "ok nice error for deploy with no stateroot"
+ 
+ # Test layout of bootloader config and refs
+ assert_not_has_dir sysroot/boot/loader.0
+-assert_has_dir sysroot/boot/loader.1
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    assert_not_has_dir sysroot/boot/loader.1
++    assert_not_has_dir sysroot/boot/loader.tmp
++else
++    assert_has_dir sysroot/boot/loader.1
++fi
+ assert_has_dir sysroot/ostree/boot.1.1
+ assert_has_file sysroot/boot/loader/entries/ostree-1.conf
+ assert_file_has_content sysroot/boot/loader/entries/ostree-1.conf 'options.* root=LABEL=MOO'
+@@ -127,8 +146,13 @@ orig_mtime=$(stat -c '%.Y' sysroot/ostree/deploy)
+ ${CMD_PREFIX} ostree admin deploy --stateroot=testos testos:testos/buildmain/x86_64-runtime
+ new_mtime=$(stat -c '%.Y' sysroot/ostree/deploy)
+ assert_not_streq "${orig_mtime}" "${new_mtime}"
+-# Need a new bootversion, sine we now have two deployments
+-assert_has_dir sysroot/boot/loader.0
++# Need a new bootversion, since we now have two deployments
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    assert_not_has_dir sysroot/boot/loader.0
++    assert_not_has_dir sysroot/boot/loader.tmp
++else
++    assert_has_dir sysroot/boot/loader.0
++fi
+ assert_not_has_dir sysroot/boot/loader.1
+ assert_has_dir sysroot/ostree/boot.0.1
+ assert_not_has_dir sysroot/ostree/boot.0.0
+@@ -146,8 +170,13 @@ echo "ok second deploy"
+ 
+ ${CMD_PREFIX} ostree admin deploy --os=testos testos:testos/buildmain/x86_64-runtime
+ # Keep the same bootversion
+-assert_has_dir sysroot/boot/loader.0
+ assert_not_has_dir sysroot/boot/loader.1
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    assert_not_has_dir sysroot/boot/loader.0
++    assert_not_has_dir sysroot/boot/loader.tmp
++else
++    assert_has_dir sysroot/boot/loader.0
++fi
+ # But swap subbootversion
+ assert_has_dir sysroot/ostree/boot.0.0
+ assert_not_has_dir sysroot/ostree/boot.0.1
+@@ -161,7 +190,12 @@ ${CMD_PREFIX} ostree admin os-init otheros
+ 
+ ${CMD_PREFIX} ostree admin deploy --os=otheros testos/buildmain/x86_64-runtime
+ assert_not_has_dir sysroot/boot/loader.0
+-assert_has_dir sysroot/boot/loader.1
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    assert_not_has_dir sysroot/boot/loader.1
++    assert_not_has_dir sysroot/boot/loader.tmp
++else
++    assert_has_dir sysroot/boot/loader.1
++fi
+ assert_has_file sysroot/boot/loader/entries/ostree-2.conf
+ assert_has_file sysroot/boot/loader/entries/ostree-3.conf
+ assert_file_has_content sysroot/ostree/deploy/testos/deploy/${rev}.1/etc/os-release 'NAME=TestOS'
+@@ -173,8 +207,13 @@ validate_bootloader
+ echo "ok independent deploy"
+ 
+ ${CMD_PREFIX} ostree admin deploy --retain --os=testos testos:testos/buildmain/x86_64-runtime
+-assert_has_dir sysroot/boot/loader.0
+ assert_not_has_dir sysroot/boot/loader.1
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    assert_not_has_dir sysroot/boot/loader.0
++    assert_not_has_dir sysroot/boot/loader.tmp
++else
++    assert_has_dir sysroot/boot/loader.0
++fi
+ assert_has_file sysroot/boot/loader/entries/ostree-4.conf
+ assert_file_has_content sysroot/ostree/deploy/testos/deploy/${rev}.2/etc/os-release 'NAME=TestOS'
+ assert_has_file sysroot/boot/loader/entries/ostree-2.conf
+@@ -191,7 +230,12 @@ rm sysroot/ostree/deploy/testos/deploy/${rev}.3/etc/aconfigfile
+ ln -s /ENOENT sysroot/ostree/deploy/testos/deploy/${rev}.3/etc/a-new-broken-symlink
+ ${CMD_PREFIX} ostree admin deploy --retain --os=testos testos:testos/buildmain/x86_64-runtime
+ assert_not_has_dir sysroot/boot/loader.0
+-assert_has_dir sysroot/boot/loader.1
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    assert_not_has_dir sysroot/boot/loader.1
++    assert_not_has_dir sysroot/boot/loader.tmp
++else
++    assert_has_dir sysroot/boot/loader.1
++fi
+ link=sysroot/ostree/deploy/testos/deploy/${rev}.4/etc/a-new-broken-symlink
+ if ! test -L ${link}; then
+     ls -al ${link}
+@@ -221,8 +265,13 @@ assert_has_file sysroot/boot/loader/entries/ostree-1.conf
+ assert_not_has_file sysroot/boot/loader/entries/ostree-2.conf
+ assert_not_has_file sysroot/boot/loader/entries/ostree-3.conf
+ ${CMD_PREFIX} ostree admin deploy --not-as-default --os=otheros testos:testos/buildmain/x86_64-runtime
+-assert_has_dir sysroot/boot/loader.0
+ assert_not_has_dir sysroot/boot/loader.1
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    assert_not_has_dir sysroot/boot/loader.0
++    assert_not_has_dir sysroot/boot/loader.tmp
++else
++    assert_has_dir sysroot/boot/loader.0
++fi
+ assert_has_file sysroot/boot/loader/entries/ostree-2.conf
+ assert_has_file sysroot/boot/loader/entries/ostree-1.conf
+ ${CMD_PREFIX} ostree admin status
+@@ -232,7 +281,12 @@ echo "ok deploy --not-as-default"
+ 
+ ${CMD_PREFIX} ostree admin deploy --retain-rollback --os=otheros testos:testos/buildmain/x86_64-runtime
+ assert_not_has_dir sysroot/boot/loader.0
+-assert_has_dir sysroot/boot/loader.1
++if [ "${folders_instead_symlinks_in_boot}" == "1" ]; then
++    assert_not_has_dir sysroot/boot/loader.1
++    assert_not_has_dir sysroot/boot/loader.tmp
++else
++    assert_has_dir sysroot/boot/loader.1
++fi
+ assert_has_file sysroot/boot/loader/entries/ostree-3.conf
+ assert_has_file sysroot/boot/loader/entries/ostree-2.conf
+ assert_has_file sysroot/boot/loader/entries/ostree-1.conf
+diff --git a/tests/test-admin-deploy-grub2.sh b/tests/test-admin-deploy-grub2.sh
+index e552cb2048..cebb20bd80 100755
+--- a/tests/test-admin-deploy-grub2.sh
++++ b/tests/test-admin-deploy-grub2.sh
+@@ -25,5 +25,6 @@ set -euo pipefail
+ setup_os_repository "archive" "grub2 ostree-grub-generator"
+ 
+ extra_admin_tests=0
++folders_instead_symlinks_in_boot=0
+ 
+ . $(dirname $0)/admin-test.sh
+diff --git a/tests/test-admin-deploy-none.sh b/tests/test-admin-deploy-none.sh
+index ad79e253fb..7a572d1c5b 100755
+--- a/tests/test-admin-deploy-none.sh
++++ b/tests/test-admin-deploy-none.sh
+@@ -25,6 +25,7 @@ set -euo pipefail
+ setup_os_repository "archive" "sysroot.bootloader none"
+ 
+ extra_admin_tests=1
++folders_instead_symlinks_in_boot=0
+ 
+ . $(dirname $0)/admin-test.sh
+ 
+diff --git a/tests/test-admin-deploy-syslinux.sh b/tests/test-admin-deploy-syslinux.sh
+index 3db219893c..14ffe81dbf 100755
+--- a/tests/test-admin-deploy-syslinux.sh
++++ b/tests/test-admin-deploy-syslinux.sh
+@@ -25,6 +25,7 @@ set -euo pipefail
+ setup_os_repository "archive" "syslinux"
+ 
+ extra_admin_tests=3
++folders_instead_symlinks_in_boot=0
+ 
+ . $(dirname $0)/admin-test.sh
+ 
+diff --git a/tests/test-admin-deploy-uboot.sh b/tests/test-admin-deploy-uboot.sh
+index 9a4d773b37..b96d23ff89 100755
+--- a/tests/test-admin-deploy-uboot.sh
++++ b/tests/test-admin-deploy-uboot.sh
+@@ -28,6 +28,7 @@ modulesdir="usr/lib/modules/${kver}"
+ setup_os_repository "archive" "uboot" ${modulesdir}
+ 
+ extra_admin_tests=2
++folders_instead_symlinks_in_boot=0
+ 
+ . $(dirname $0)/admin-test.sh
+ 
+diff --git a/tests/test-admin-dir-deploy-grub2.sh b/tests/test-admin-dir-deploy-grub2.sh
+new file mode 100755
+index 0000000000..bedc507093
+--- /dev/null
++++ b/tests/test-admin-dir-deploy-grub2.sh
+@@ -0,0 +1,30 @@
++#!/bin/bash
++#
++# Copyright (C) 2011,2014 Colin Walters <walters@verbum.org>
++#
++# SPDX-License-Identifier: LGPL-2.0+
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library. If not, see <https://www.gnu.org/licenses/>.
++
++set -euo pipefail
++
++. $(dirname $0)/libtest.sh
++
++# Exports OSTREE_SYSROOT so --sysroot not needed.
++setup_os_repository "archive" "grub2 ostree-grub-generator"
++
++extra_admin_tests=0
++folders_instead_symlinks_in_boot=1
++
++. $(dirname $0)/admin-test.sh
+diff --git a/tests/test-admin-dir-deploy-none.sh b/tests/test-admin-dir-deploy-none.sh
+new file mode 100755
+index 0000000000..06fcb610e1
+--- /dev/null
++++ b/tests/test-admin-dir-deploy-none.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++#
++# Copyright (C) 2019 Robert Fairley <rfairley@redhat.com>
++#
++# SPDX-License-Identifier: LGPL-2.0+
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library. If not, see <https://www.gnu.org/licenses/>.
++
++set -euo pipefail
++
++. $(dirname $0)/libtest.sh
++
++# Exports OSTREE_SYSROOT so --sysroot not needed.
++setup_os_repository "archive" "sysroot.bootloader none"
++
++extra_admin_tests=1
++folders_instead_symlinks_in_boot=1
++
++. $(dirname $0)/admin-test.sh
++
++# Test that the bootloader configuration "none" generates BLS config snippets.
++cd ${test_tmpdir}
++rm httpd osdata testos-repo sysroot -rf
++setup_os_repository "archive" "sysroot.bootloader none"
++${CMD_PREFIX} ostree pull-local --repo=sysroot/ostree/repo --remote testos testos-repo testos/buildmain/x86_64-runtime
++# Test that configuring sysroot.bootloader="none" is a workaround for previous
++# grub2 bootloader issue (see https://github.com/ostreedev/ostree/issues/1774)
++mkdir -p sysroot/boot/grub2
++touch sysroot/boot/grub2/grub.cfg
++${CMD_PREFIX} ostree admin deploy --karg=root=LABEL=MOO --karg=quiet --os testos testos/buildmain/x86_64-runtime > out.txt
++assert_file_has_content out.txt "Bootloader updated.*"
++assert_file_has_content sysroot/boot/loader/entries/ostree-1.conf 'options.* root=LABEL=MOO'
++assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/vmlinuz-3.6.0 'a kernel'
++assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/.vmlinuz-3.6.0.hmac  'an hmac file'
++assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/initramfs-3.6.0.img 'an initramfs'
++echo "ok generate bls config on first deployment"
++
++# TODO: add tests to try setting with an unsupported bootloader config,
++# once https://github.com/ostreedev/ostree/issues/1827 is solved.
++# The tests should check that the following commands fail:
++#  ${CMD_PREFIX} ostree --repo=sysroot/ostree/repo config set sysroot.bootloader unsupported_bootloader
++#  ${CMD_PREFIX} ostree --repo=sysroot/ostree/repo config set sysroot.bootloader ""
+diff --git a/tests/test-admin-dir-deploy-syslinux.sh b/tests/test-admin-dir-deploy-syslinux.sh
+new file mode 100755
+index 0000000000..9def32c945
+--- /dev/null
++++ b/tests/test-admin-dir-deploy-syslinux.sh
+@@ -0,0 +1,71 @@
++#!/bin/bash
++#
++# Copyright (C) 2011,2014 Colin Walters <walters@verbum.org>
++#
++# SPDX-License-Identifier: LGPL-2.0+
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library. If not, see <https://www.gnu.org/licenses/>.
++
++set -euo pipefail
++
++. $(dirname $0)/libtest.sh
++
++# Exports OSTREE_SYSROOT so --sysroot not needed.
++setup_os_repository "archive" "syslinux"
++
++extra_admin_tests=3
++folders_instead_symlinks_in_boot=1
++
++. $(dirname $0)/admin-test.sh
++
++# Test the legacy dirs
++for test_bootdir in "boot" "usr/lib/ostree-boot"; do
++    cd ${test_tmpdir}
++    rm httpd osdata testos-repo sysroot -rf
++    setup_os_repository "archive" "syslinux" $test_bootdir
++    ${CMD_PREFIX} ostree --repo=sysroot/ostree/repo pull-local --remote=testos testos-repo testos/buildmain/x86_64-runtime
++    rev=$(${CMD_PREFIX} ostree --repo=sysroot/ostree/repo rev-parse testos/buildmain/x86_64-runtime)
++    ${CMD_PREFIX} ostree admin deploy --karg=root=LABEL=MOO --karg=quiet --os=testos testos:testos/buildmain/x86_64-runtime
++    assert_file_has_content sysroot/boot/loader/entries/ostree-1.conf 'options.* root=LABEL=MOO'
++    assert_file_has_content sysroot/boot/loader/entries/ostree-1.conf 'options.* quiet'
++    assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/vmlinuz-3.6.0 'a kernel'
++    assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/initramfs-3.6.0.img 'an initramfs'
++    # kernel/initrams should also be in the tree's /boot with the checksum
++    assert_file_has_content sysroot/ostree/deploy/testos/deploy/${rev}.0/$test_bootdir/vmlinuz-3.6.0-${bootcsum} 'a kernel'
++    assert_file_has_content sysroot/ostree/deploy/testos/deploy/${rev}.0/$test_bootdir/initramfs-3.6.0.img-${bootcsum} 'an initramfs'
++    assert_file_has_content sysroot/ostree/deploy/testos/deploy/${rev}.0/etc/os-release 'NAME=TestOS'
++    assert_file_has_content sysroot/ostree/boot.1/testos/${bootcsum}/0/etc/os-release 'NAME=TestOS'
++    ${CMD_PREFIX} ostree admin status
++    validate_bootloader
++    echo "ok kernel in $test_bootdir"
++done
++
++# And test that legacy overrides /usr/lib/modules
++cd ${test_tmpdir}
++rm httpd osdata testos-repo sysroot -rf
++setup_os_repository "archive" "syslinux" "usr/lib/ostree-boot"
++cd osdata
++echo "this is a kernel without an initramfs like Fedora 26" > usr/lib/modules/3.6.0/vmlinuz
++usrlib_modules_bootcsum=$(cat usr/lib/modules/3.6.0/vmlinuz | sha256sum | cut -f 1 -d ' ')
++${CMD_PREFIX} ostree --repo=${test_tmpdir}/testos-repo commit --add-metadata-string version=1.0.9 -b testos/buildmain/x86_64-runtime -s "Build"
++cd ${test_tmpdir}
++${CMD_PREFIX} ostree --repo=sysroot/ostree/repo pull-local --remote=testos testos-repo testos/buildmain/x86_64-runtime
++rev=$(${CMD_PREFIX} ostree --repo=sysroot/ostree/repo rev-parse testos/buildmain/x86_64-runtime)
++${CMD_PREFIX} ostree admin deploy --karg=root=LABEL=MOO --karg=quiet --os=testos testos:testos/buildmain/x86_64-runtime
++assert_file_has_content sysroot/boot/loader/entries/ostree-1.conf 'options.* root=LABEL=MOO'
++assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/vmlinuz-3.6.0 'a kernel'
++assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/initramfs-3.6.0.img 'an initramfs'
++# Note this bootcsum shouldn't be the modules one
++assert_not_streq "${bootcsum}" "${usrlib_modules_bootcsum}"
++echo "ok kernel in /usr/lib/modules and /usr/lib/ostree-boot"
+diff --git a/tests/test-admin-dir-deploy-uboot.sh b/tests/test-admin-dir-deploy-uboot.sh
+new file mode 100755
+index 0000000000..5913ce84f8
+--- /dev/null
++++ b/tests/test-admin-dir-deploy-uboot.sh
+@@ -0,0 +1,79 @@
++#!/bin/bash
++#
++# Copyright (C) 2011,2014 Colin Walters <walters@verbum.org>
++# Copyright (C) 2013 Javier Martinez <javier.martinez@collabora.co.uk>
++#
++# SPDX-License-Identifier: LGPL-2.0+
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library. If not, see <https://www.gnu.org/licenses/>.
++
++set -euo pipefail
++
++. $(dirname $0)/libtest.sh
++
++# Exports OSTREE_SYSROOT so --sysroot not needed.
++kver="3.6.0"
++modulesdir="usr/lib/modules/${kver}"
++setup_os_repository "archive" "uboot" ${modulesdir}
++
++extra_admin_tests=2
++folders_instead_symlinks_in_boot=1
++
++. $(dirname $0)/admin-test.sh
++
++cd ${test_tmpdir}
++# Note this test actually requires a checksum change to /boot,
++# because adding the uEnv.txt isn't currently covered by the
++# "bootcsum".
++os_repository_new_commit "uboot test" "test upgrade multiple kernel args"
++mkdir -p osdata/usr/lib/ostree-boot
++cat << 'EOF' > osdata/usr/lib/ostree-boot/uEnv.txt
++loaduimage=load mmc ${bootpart} ${loadaddr} ${kernel_image}
++loadfdt=load mmc ${bootpart} ${fdtaddr} ${bootdir}${fdtfile}
++loadramdisk=load mmc ${bootpart} ${rdaddr} ${ramdisk_image}
++mmcargs=setenv bootargs $bootargs console=${console} ${optargs} root=${mmcroot} rootfstype=${mmcrootfstype}
++mmcboot=run loadramdisk; echo Booting from mmc ....; run mmcargs; bootz ${loadaddr} ${rdaddr} ${fdtaddr}
++EOF
++${CMD_PREFIX} ostree --repo=testos-repo commit --tree=dir=osdata/ -b testos/buildmain/x86_64-runtime
++${CMD_PREFIX} ostree admin upgrade --os=testos
++assert_file_has_content sysroot/boot/uEnv.txt "loadfdt="
++assert_file_has_content sysroot/boot/uEnv.txt "kernel_image="
++assert_file_has_content sysroot/boot/uEnv.txt "kernel_image2="
++assert_file_has_content sysroot/boot/uEnv.txt "kernel_image3="
++
++echo "ok merging uEnv.txt files"
++
++cd ${test_tmpdir}
++os_repository_new_commit "uboot test" "test with device tree directory"
++
++devicetree_path=osdata/${modulesdir}/dtb/asoc-board.dtb
++devicetree_overlay_path=osdata/${modulesdir}/dtb/overlays/overlay.dtbo
++
++mkdir -p osdata/${modulesdir}/dtb
++echo "a device tree" > ${devicetree_path}
++mkdir -p osdata/${modulesdir}/dtb/overlays
++echo "a device tree overlay" > ${devicetree_overlay_path}
++
++bootcsum=$(
++  (echo "new: a kernel uboot test" && echo "new: an initramfs uboot test" &&
++    cat ${devicetree_path} ${devicetree_overlay_path} ) |
++  sha256sum | cut -f 1 -d ' ')
++
++${CMD_PREFIX} ostree --repo=testos-repo commit --tree=dir=osdata/ -b testos/buildmain/x86_64-runtime
++${CMD_PREFIX} ostree admin upgrade --os=testos
++assert_file_has_content sysroot/boot/uEnv.txt "fdtdir="
++assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/dtb/asoc-board.dtb 'a device tree'
++assert_file_has_content sysroot/boot/ostree/testos-${bootcsum}/dtb/overlays/overlay.dtbo 'a device tree overlay'
++
++echo "ok deploying fdtdir"
