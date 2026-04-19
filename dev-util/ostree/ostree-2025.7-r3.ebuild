@@ -73,6 +73,7 @@ PATCHES=(
 	# matrixOS.
 	"${FILESDIR}"/0001-status-Include-deployment-origin-refspec-as-refspec-.patch
 	"${FILESDIR}/ostree-2025.7-systemd-boot-support.patch"
+	"${FILESDIR}"/0008-boot-dracut-use-systemdsystemunitdir-instead-of-syst.patch
 )
 
 src_prepare() {
