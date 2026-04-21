@@ -3,7 +3,6 @@
 
 EAPI=8
 
-KERNEL_IUSE_GENERIC_UKI=1
 KERNEL_IUSE_MODULES_SIGN=1
 
 inherit kernel-build toolchain-funcs verify-sig
@@ -195,7 +194,7 @@ RDEPEND="${RDEPEND}
 	${MATRIXOS_COMMON_DEPEND}
 "
 PDEPEND="${PDEPEND}
-	~sys-kernel/matrixos-initramfs-${PV}[ostree=,generic-uki=,initramfs=]
+	~sys-kernel/matrixos-initramfs-${PV}[ostree=]
 "
 MATRIXOS_MYVERSION="-${PN%%-*}"
 
