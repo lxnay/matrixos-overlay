@@ -18,7 +18,7 @@ S="${WORKDIR}"
 
 CDEPEND="
 	~sys-kernel/matrixos-kconfig-${PV}[slim-initramfs=]
-	~sys-kernel/matrixos-kernel-${PV}[initramfs]
+	~sys-kernel/matrixos-kernel-${PV}
 "
 BDEPEND="${CDEPEND}
 	!slim-initramfs? (
