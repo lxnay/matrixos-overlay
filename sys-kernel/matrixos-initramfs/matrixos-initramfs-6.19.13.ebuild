@@ -42,7 +42,6 @@ BDEPEND="${CDEPEND}
 	dev-util/ostree[dracut]
 "
 RDEPEND="${CDEPEND}"
-PDEPEND="=virtual/dist-kernel-${PV}"
 
 src_unpack() {
 	default
