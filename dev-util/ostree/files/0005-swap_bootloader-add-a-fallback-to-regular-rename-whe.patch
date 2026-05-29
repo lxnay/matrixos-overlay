@@ -1,0 +1,41 @@
+From 181da5d080d48f647f48a672caf9aba1434e6be8 Mon Sep 17 00:00:00 2001
+From: Fabio Erculiani <m@lxnay.me>
+Date: Fri, 29 May 2026 11:13:36 +0200
+Subject: [PATCH 5/5] swap_bootloader: add a fallback to regular rename when
+ loader doesn't exist.
+
+---
+ src/libostree/ostree-sysroot-deploy.c | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/src/libostree/ostree-sysroot-deploy.c b/src/libostree/ostree-sysroot-deploy.c
+index 9640c97e..2b401b1d 100644
+--- a/src/libostree/ostree-sysroot-deploy.c
++++ b/src/libostree/ostree-sysroot-deploy.c
+@@ -2390,12 +2390,17 @@ swap_bootloader (OstreeSysroot *sysroot, OstreeBootloader *bootloader, gboolean
+     }
+   else
+     {
+-      /* Atomically swap loader.tmp (the freshly-built directory) with the live
+-       * loader directory.  After the exchange loader.tmp holds the old content
+-       * which we remove below once the new state is safely on disk.
+-       */
+-      if (glnx_renameat2_exchange (sysroot->boot_fd, "loader.tmp", sysroot->boot_fd, "loader") != 0)
+-        return glnx_throw_errno_prefix (error, "Exchanging loader.tmp and loader");
++      /* First deployment: loader directory may not exist yet, fall back to rename. */
++      if (glnx_renameat2_exchange (sysroot->boot_fd, "loader.tmp",
++                                    sysroot->boot_fd, "loader") != 0)
++        {
++          if (errno != ENOENT)
++            return glnx_throw_errno_prefix (error, "Exchanging loader.tmp and loader");
++          /* loader doesn't exist yet (first deploy) — plain rename is fine. */
++          if (!glnx_renameat (sysroot->boot_fd, "loader.tmp",
++                               sysroot->boot_fd, "loader", error))
++            return FALSE;
++        }
+     }
+ 
+   /* As grub doesn't support replaying XFS journal,
+-- 
+2.53.0
+

@@ -72,7 +72,11 @@ PATCHES=(
 	"${FILESDIR}"/${PN}-2025.6-include-stdint-musl.patch
 	# matrixOS.
 	"${FILESDIR}"/0001-status-Include-deployment-origin-refspec-as-refspec-.patch
+
+	# systemd-boot support
 	"${FILESDIR}/ostree-2025.7-systemd-boot-support.patch"
+	"${FILESDIR}"/0005-swap_bootloader-add-a-fallback-to-regular-rename-whe.patch
+
 	"${FILESDIR}"/0008-boot-dracut-use-systemdsystemunitdir-instead-of-syst.patch
 )
 
