@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Steam Big Picture
+Comment=Start Steam in Big Picture Mode via Gamescope
+Type=Application
+DesktopNames=Steam
+Exec=gamescope -e -f -- steam -gamepadui
