@@ -7,7 +7,7 @@ DESCRIPTION="Linux kernel initramfs built for matrixOS with Gentoo patches"
 HOMEPAGE="https://matrixos.org"
 SRC_URI=""
 
-KEYWORDS="~amd64"
+KEYWORDS="amd64"
 # matrixOS requires initramfs to be built and installed into usr/lib/modules/$kver.
 # As this is the location supported by ostree.
 IUSE="${IUSE} +dracut-userconf"

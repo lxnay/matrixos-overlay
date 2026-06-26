@@ -7,26 +7,20 @@ DESCRIPTION="Linux kernel initramfs built for matrixOS with Gentoo patches"
 HOMEPAGE="https://matrixos.org"
 SRC_URI=""
 
-KEYWORDS="~amd64"
+KEYWORDS="amd64"
 # matrixOS requires initramfs to be built and installed into usr/lib/modules/$kver.
 # As this is the location supported by ostree.
-IUSE="${IUSE} +dracut-userconf slim-initramfs"
+IUSE="${IUSE} +dracut-userconf"
 
 KV_FULL="${PV}-matrixos"
 SLOT="${PV}"
 S="${WORKDIR}"
 
 CDEPEND="
-	~sys-kernel/matrixos-kconfig-${PV}[slim-initramfs=]
+	~sys-kernel/matrixos-kconfig-${PV}
 	~sys-kernel/matrixos-kernel-${PV}
 "
 BDEPEND="${CDEPEND}
-	!slim-initramfs? (
-		app-crypt/tpm2-tools
-		net-fs/cifs-utils
-		net-fs/nfs-utils
-		net-misc/networkmanager
-	)
 	app-misc/jq
 	net-misc/dhcp
 	sys-apps/nvme-cli
@@ -91,14 +85,6 @@ src_install() {
 		systemd-sysusers systemd-udevd systemd-veritysetup
 		udev-rules uefi-lib
 	)
-	if ! use slim-initramfs; then
-		dracut_modules+=(
-			cifs
-			network-manager
-			nfs
-			tpm2-tss
-		)
-	fi
 	local _uki_specific_ignored_dracut_modules=(
 		systemd-pcrphase pcsc
 	)
@@ -108,8 +94,7 @@ src_install() {
 	# nvidia might go out of sync if we add it? Also these
 	# drivers can add huge firmware files
 	local dracut_omit_drivers=()
-	if use slim-initramfs; then
-		dracut_omit_drivers+=(
+    dracut_omit_drivers+=(
 			nvidia
 			nvidia_drm
 			nvidia_modeset
@@ -118,8 +103,7 @@ src_install() {
 			amdgpu
 			i915
 			xe
-		)
-	fi
+    )
 	dracut_args+=(
 		--kernel-image="${image}"
 		--kmoddir="${modulesdir}"
