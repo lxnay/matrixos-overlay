@@ -3,10 +3,10 @@
 
 EAPI=8
 
-LLVM_COMPAT=( {18..21} )
+LLVM_COMPAT=( {18..22} )
 LLVM_OPTIONAL=1
 CARGO_OPTIONAL=1
-PYTHON_COMPAT=( python3_{11..14} )
+PYTHON_COMPAT=( python3_{12..14} )
 
 inherit flag-o-matic llvm-r2 meson-multilib python-any-r1 linux-info
 
@@ -28,7 +28,7 @@ RUST_OPTIONAL=1
 inherit cargo
 
 DESCRIPTION="OpenGL-like graphic library for Linux"
-HOMEPAGE="https://www.mesa3d.org/ https://mesa.freedesktop.org/"
+HOMEPAGE="https://mesa3d.org/"
 
 if [[ ${PV} == 9999 ]]; then
 	EGIT_REPO_URI="https://gitlab.freedesktop.org/mesa/mesa.git"
@@ -90,7 +90,7 @@ RDEPEND="
 			opencl? (
 				dev-util/spirv-llvm-translator:\${LLVM_SLOT}
 				llvm-core/clang:\${LLVM_SLOT}[llvm_targets_AMDGPU(+),${MULTILIB_USEDEP}]
-				=llvm-core/libclc-\${LLVM_SLOT}*[spirv(-)]
+				=llvm-runtimes/libclc-\${LLVM_SLOT}*[spirv(-)]
 			)
 		")
 		video_cards_r600? (
@@ -103,7 +103,7 @@ RDEPEND="
 	lm-sensors? ( sys-apps/lm-sensors:=[${MULTILIB_USEDEP}] )
 	opencl? (
 		>=virtual/opencl-3
-		llvm-core/libclc[spirv(-)]
+		llvm-runtimes/libclc[spirv(-)]
 		virtual/libelf:0=
 	)
 	vaapi? (
@@ -136,7 +136,7 @@ RDEPEND="
 
 DEPEND="${RDEPEND}
 	sysprof? ( >=dev-util/sysprof-capture-49.0[${MULTILIB_USEDEP}] )
-	video_cards_d3d12? ( >=dev-util/directx-headers-1.618.1[${MULTILIB_USEDEP}] )
+	video_cards_d3d12? ( >=dev-util/directx-headers-1.619.1[${MULTILIB_USEDEP}] )
 	valgrind? ( dev-debug/valgrind )
 	wayland? ( >=dev-libs/wayland-protocols-1.41 )
 	X? (
@@ -147,7 +147,7 @@ DEPEND="${RDEPEND}
 
 CLC_DEPSTRING="
 	~dev-util/mesa_clc-${PV}[video_cards_asahi?,video_cards_panfrost?]
-	llvm-core/libclc[spirv(-)]
+	llvm-runtimes/libclc[spirv(-)]
 "
 BDEPEND="
 	${PYTHON_DEPS}
@@ -184,6 +184,12 @@ x86? (
 	usr/lib/libgallium-*.so
 	usr/lib/libGLX_mesa.so.0.0.0
 )"
+
+PATCHES=(
+	# matrixOS: fix mesa on-disk cache when using ostree with dl so mtimes of 0.
+	"${FILESDIR}/mesa-25-fix-mtime-cache-check-with-ostree.patch"
+	"${FILESDIR}"/${PN}-26.1.2-remove-bogus-const.patch
+)
 
 src_unpack() {
 	if [[ ${PV} == 9999 ]]; then
@@ -272,9 +278,6 @@ pkg_setup() {
 }
 
 src_prepare() {
-	# matrixOS: fix mesa on-disk cache when using ostree with dl so mtimes of 0.
-	eapply "${FILESDIR}/mesa-25-fix-mtime-cache-check-with-ostree.patch"
-
 	default
 	sed -i -e "/^PLATFORM_SYMBOLS/a '__gentoo_check_ldflags__'," \
 		bin/symbols-check.py || die # bug #830728
@@ -407,6 +410,7 @@ multilib_src_configure() {
 		-Dgallium-drivers=$(driver_list "${GALLIUM_DRIVERS[*]}")
 		-Dvulkan-drivers=$(driver_list "${VULKAN_DRIVERS[*]}")
 		-Db_ndebug=$(usex debug false true)
+		-Dallow-broken-lto=true
 	)
 	meson_src_configure
 }
