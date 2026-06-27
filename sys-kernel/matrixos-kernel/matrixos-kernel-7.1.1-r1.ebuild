@@ -64,6 +64,9 @@ src_prepare() {
 			die "Unsupported arch ${ARCH}"
 			;;
 	esac
+
+	local merge_configs=()
+	kernel-build_merge_configs "${merge_configs[@]}"
 }
 
 src_install() {
