@@ -71,7 +71,7 @@ src_prepare() {
 	sed -i 's/libtinfo/libtinfo{,w}/' \
 		"cmd/snap-confine/snap-confine.apparmor.in" || die
 
-	eapply "${FILESDIR}/snapd-support-ostree-2.patch"
+	eapply "${FILESDIR}/snapd-support-ostree-3.patch"
 
 	if ! use forced-devmode; then
 		sed -e 's#return !apparmorFull#if !apparmorFull {\n\t\tpanic("USE=forced-devmode is disabled")\n\t}\n\treturn false#' \
