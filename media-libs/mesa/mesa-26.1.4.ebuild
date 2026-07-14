@@ -188,7 +188,6 @@ x86? (
 PATCHES=(
 	# matrixOS: fix mesa on-disk cache when using ostree with dl so mtimes of 0.
 	"${FILESDIR}/mesa-25-fix-mtime-cache-check-with-ostree.patch"
-	"${FILESDIR}"/${PN}-26.1.2-remove-bogus-const.patch
 )
 
 src_unpack() {
