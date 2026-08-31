@@ -20,7 +20,7 @@ SRC_URI="https://github.com/amkillam/${PN}/archive/${COMMIT}.tar.gz -> ${P}.tar.
 
 LICENSE="GPL-2"
 SLOT="0"
-KEYWORDS="~amd64"
+KEYWORDS="amd64"
 
 S="${WORKDIR}/${PN}-${COMMIT}"
 
