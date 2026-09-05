@@ -8,7 +8,7 @@ LLVM_OPTIONAL=1
 CARGO_OPTIONAL=1
 PYTHON_COMPAT=( python3_{12..14} )
 
-inherit flag-o-matic llvm-r2 meson-multilib python-any-r1 linux-info
+inherit flag-o-matic linux-info llvm-r2 meson-multilib python-any-r1 toolchain-funcs
 
 MY_P="${P/_/-}"
 
@@ -21,7 +21,7 @@ CRATES="
 	unicode-ident@1.0.12
 "
 
-RUST_MIN_VER="1.82.0"
+RUST_MIN_VER="1.85.0"
 RUST_MULTILIB=1
 RUST_OPTIONAL=1
 
@@ -44,7 +44,8 @@ fi
 # but there are "stale" distfiles on the mirrors with the wrong names.
 # export MESON_PACKAGE_CACHE_DIR="${DISTDIR}"
 SRC_URI+="
-	${CARGO_CRATE_URIS}
+	opencl? ( ${CARGO_CRATE_URIS} )
+	!opencl? ( video_cards_nvk? ( ${CARGO_CRATE_URIS} ) )
 "
 
 S="${WORKDIR}/${MY_P}"
@@ -76,7 +77,7 @@ REQUIRED_USE="
 	video_cards_nvk? ( vulkan video_cards_nouveau )
 "
 
-LIBDRM_DEPSTRING=">=x11-libs/libdrm-2.4.121"
+LIBDRM_DEPSTRING=">=x11-libs/libdrm-2.4.133"
 RDEPEND="
 	${LIBDRM_DEPSTRING}[${MULTILIB_USEDEP}]
 	>=dev-libs/expat-2.1.0-r3[${MULTILIB_USEDEP}]
@@ -111,6 +112,9 @@ RDEPEND="
 	)
 	video_cards_i915? (
 		${LIBDRM_DEPSTRING}[video_cards_intel]
+	)
+	video_cards_nvk? (
+		virtual/libelf:0=[${MULTILIB_USEDEP}]
 	)
 	video_cards_radeonsi? (
 		${LIBDRM_DEPSTRING}[video_cards_amdgpu]
@@ -157,7 +161,7 @@ BDEPEND="
 	)
 	>=dev-build/meson-1.7.0
 	app-alternatives/yacc
-	app-alternatives/lex
+	sys-devel/flex
 	virtual/pkgconfig
 	$(python_gen_any_dep "
 		>=dev-python/mako-0.8.0[\${PYTHON_USEDEP}]
@@ -169,6 +173,7 @@ BDEPEND="
 	video_cards_panfrost? ( ${CLC_DEPSTRING} )
 	vulkan? (
 		dev-util/glslang
+		video_cards_imagination? ( ${CLC_DEPSTRING} )
 		video_cards_nvk? (
 			>=dev-util/bindgen-0.71.1
 			>=dev-util/cbindgen-0.26.0
@@ -197,17 +202,23 @@ src_unpack() {
 		unpack ${MY_P}.tar.xz
 	fi
 
-	# We need this because we cannot tell meson to use DISTDIR yet
-	pushd "${DISTDIR}" >/dev/null || die
-	mkdir -p "${S}"/subprojects/packagecache || die
-	local i
-	for i in *.crate; do
-		ln -s "${PWD}/${i}" "${S}/subprojects/packagecache/${i/.crate/}.tar.gz" || die
-	done
-	popd >/dev/null || die
+	if use opencl || use video_cards_nvk; then
+		# We need this because we cannot tell meson to use DISTDIR yet
+		mkdir -p "${S}"/subprojects/packagecache || die
+		local i
+		for i in ${CRATES}; do
+			i=${i/@/-}
+			ln -s "${DISTDIR}/${i}.crate" \
+				"${S}/subprojects/packagecache/${i}.tar.gz" || die
+		done
+	fi
 }
 
 pkg_pretend() {
+	if [[ ${MERGE_TYPE} != binary ]] && use test; then
+		tc-check-openmp
+	fi
+
 	if use vulkan; then
 		if ! use video_cards_asahi &&
 		   ! use video_cards_d3d12 &&
@@ -248,6 +259,10 @@ python_check_deps() {
 }
 
 pkg_setup() {
+	if [[ ${MERGE_TYPE} != binary ]] && use test; then
+		tc-check-openmp
+	fi
+
 	# warning message for bug 459306
 	if use llvm && has_version llvm-core/llvm[!debug=]; then
 		ewarn "Mismatch between debug USE flags in media-libs/mesa and llvm-core/llvm"
@@ -376,7 +391,8 @@ multilib_src_configure() {
 	if use video_cards_asahi ||
 	   use video_cards_intel ||
 	   use video_cards_nvk ||
-	   use video_cards_panfrost; then
+	   use video_cards_panfrost ||
+	   { use vulkan && use video_cards_imagination; }; then
 	   emesonargs+=(-Dmesa-clc=system)
 	fi
 
