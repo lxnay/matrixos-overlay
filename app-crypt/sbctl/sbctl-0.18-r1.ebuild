@@ -19,10 +19,14 @@ LICENSE+="  "
 SLOT="0"
 KEYWORDS="amd64"
 
-DEPEND="sys-apps/pcsc-lite"
+COMMON_DEPEND="sys-apps/pcsc-lite"
+RDEPEND="${COMMON_DEPEND}"
 
-BDEPEND="app-text/asciidoc
-	verify-sig? ( sec-keys/openpgp-keys-foxboron )"
+BDEPEND="
+	${COMMON_DEPEND}
+	app-text/asciidoc
+	verify-sig? ( sec-keys/openpgp-keys-foxboron )
+"
 
 VERIFY_SIG_OPENPGP_KEY_PATH="/usr/share/openpgp-keys/foxboron.asc"
 
