@@ -30,12 +30,12 @@ RDEPEND="
 "
 BDEPEND="
 	debug? ( dev-util/pahole )
-    ${MATRIXOS_COMMON_DEPEND}
+	${MATRIXOS_COMMON_DEPEND}
 "
 PDEPEND="
-    ~sys-kernel/matrixos-initramfs-${PV}
+	~sys-kernel/matrixos-initramfs-${PV}
 	=virtual/dist-kernel-${PV}
-    ${MATRIXOS_COMMON_DEPEND}
+	${MATRIXOS_COMMON_DEPEND}
 "
 
 QA_FLAGS_IGNORED="

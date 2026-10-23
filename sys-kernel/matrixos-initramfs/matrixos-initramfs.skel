@@ -32,7 +32,7 @@ BDEPEND="${CDEPEND}
 	sys-fs/dmraid
 	sys-fs/mdadm
 	sys-fs/multipath-tools
-	>=sys-kernel/linux-firmware-20251124
+	>=sys-kernel/linux-firmware-20261019
 	dev-util/ostree[dracut]
 "
 RDEPEND="${CDEPEND}"
