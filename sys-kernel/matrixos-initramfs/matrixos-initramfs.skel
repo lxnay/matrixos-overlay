@@ -12,7 +12,10 @@ KEYWORDS="amd64"
 # As this is the location supported by ostree.
 IUSE="${IUSE} +dracut-userconf"
 
-KV_FULL="${PV}-matrixos"
+KV="${PV}"
+[[ ${PV} =~ ^[0-9]+\.[0-9]+$ ]] && KV+=".0"
+KV_FULL="${KV}-matrixos"
+
 SLOT="${PV}"
 S="${WORKDIR}"
 
